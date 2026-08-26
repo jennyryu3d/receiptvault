@@ -6,7 +6,7 @@
 
 window.RV_CONFIG = {
   // Supabase → Project Settings → Data API 에서 복사
-  SUPABASE_URL: '',       // 예: https://abcdefghijkl.supabase.co
+  SUPABASE_URL: 'https://qkeocwypitffhrklodxl.supabase.co',       // 예: https://abcdefghijkl.supabase.co
   SUPABASE_ANON_KEY: '',  // 예: eyJhbGciOi... (publishable / anon key)
 
   // Cloudflare Worker 주소. 비워두면 AI 자동 인식 버튼이 숨겨지고
