@@ -45,6 +45,21 @@
 
     monthKey: function (s) { return (s || '').slice(0, 7); },
 
+    // 사람이 친 금액을 숫자로 바꾼다.
+    // '12,345' '$12.34' '₩12,000' '12 345' 전부 받아준다 —
+    // 영수증을 보고 옮겨 적을 때 통화기호나 쉼표가 딸려오는 건 너무 당연한 일이라,
+    // 그걸 거부하고 아무 말 없이 멈추는 쪽이 잘못이다.
+    parseAmount: function (v) {
+      if (v == null || v === '') return NaN;
+      if (typeof v === 'number') return v;
+      var cleaned = String(v)
+        .replace(/[^\d.,-]/g, '')   // 통화기호·공백·글자 제거
+        .replace(/,/g, '');         // 천 단위 쉼표 제거
+      if (cleaned === '' || cleaned === '-' || cleaned === '.') return NaN;
+      var n = Number(cleaned);
+      return isFinite(n) ? n : NaN;
+    },
+
     prettyMonth: function (key) {
       var p = (key || '').split('-');
       return p[0] + '년 ' + Number(p[1]) + '월';
@@ -61,7 +76,7 @@
 
       return raw.map(function (s) {
         var cat = window.RV_CAT(s.category);
-        var amount = Number(s.amount) || 0;
+        var amount = RV_UTIL.parseAmount(s.amount) || 0;
         return {
           category: cat.key,
           cat: cat,
@@ -83,8 +98,10 @@
 
     // 분할 합계가 총액과 맞는지. 센트 단위 반올림 오차는 봐준다.
     splitRemainder: function (total, splits) {
-      var sum = (splits || []).reduce(function (s, x) { return s + (Number(x.amount) || 0); }, 0);
-      var diff = (Number(total) || 0) - sum;
+      var sum = (splits || []).reduce(function (s, x) {
+        return s + (RV_UTIL.parseAmount(x.amount) || 0);
+      }, 0);
+      var diff = (RV_UTIL.parseAmount(total) || 0) - sum;
       return Math.abs(diff) < 0.005 ? 0 : diff;
     },
 
@@ -369,9 +386,13 @@
 
       // 분할 정리: 금액 0인 줄은 버리고, 한 줄만 남으면 분할이 아니다.
       var splits = (rec.splits || [])
-        .filter(function (s) { return s.category && Number(s.amount) > 0; })
+        .filter(function (s) { return s.category && RV_UTIL.parseAmount(s.amount) > 0; })
         .map(function (s) {
-          return { category: s.category, amount: Number(Number(s.amount).toFixed(2)), note: s.note || '' };
+          return {
+            category: s.category,
+            amount: Number(RV_UTIL.parseAmount(s.amount).toFixed(2)),
+            note: s.note || '',
+          };
         });
       if (splits.length < 2) splits = null;
 
@@ -381,13 +402,18 @@
         mainCategory = splits.reduce(function (a, b) { return b.amount > a.amount ? b : a; }).category;
       }
 
+      var taxAmount = RV_UTIL.parseAmount(rec.tax);
+
       var row = {
         purchased_at: rec.purchased_at,
         merchant: rec.merchant || '',
+        // 세무사에게 나가는 영문 표기. 비어 있으면 원래 이름을 그대로 쓴다.
+        merchant_en: (rec.merchant_en || '').trim() || null,
+        notes_en: (rec.notes_en || '').trim() || null,
         category: mainCategory,
         splits: splits,
-        total: Number(rec.total) || 0,
-        tax: rec.tax === '' || rec.tax == null ? null : Number(rec.tax),
+        total: RV_UTIL.parseAmount(rec.total) || 0,
+        tax: isFinite(taxAmount) ? taxAmount : null,
         currency: CFG.CURRENCY || 'USD',
         payment_method: rec.payment_method || null,
         business_pct: rec.business_pct == null ? 100 : Number(rec.business_pct),

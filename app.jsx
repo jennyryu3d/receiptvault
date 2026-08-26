@@ -31,6 +31,11 @@ function Banner({ kind, children, onClose }) {
   );
 }
 
+// 한글이 섞여 있는지. 세무사용 영문 표기가 필요한지 판단하는 데만 쓴다.
+function hasKorean(s) {
+  return /[ㄱ-ㆎ가-힣]/.test(s || '');
+}
+
 function CategoryPill({ catKey }) {
   const c = window.RV_CAT(catKey);
   return (
@@ -272,6 +277,8 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
           splits: aiSplits,
           purchased_at: got.purchased_at || r.purchased_at,
           merchant: got.merchant || r.merchant,
+          merchant_en: got.merchant_en || r.merchant_en || '',
+          notes_en: got.notes_en || r.notes_en || '',
           total: got.total != null ? String(got.total) : r.total,
           tax: got.tax != null ? String(got.tax) : r.tax,
           payment_method: got.payment_method || r.payment_method,
@@ -290,7 +297,10 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
 
   async function save() {
     if (!rec.purchased_at) return setErr('날짜를 넣어줘.');
-    if (!rec.total || isNaN(Number(rec.total))) return setErr('금액을 숫자로 넣어줘.');
+
+    const amount = U.parseAmount(rec.total);
+    if (!isFinite(amount) || amount <= 0) return setErr('금액을 넣어줘. 숫자만 있으면 돼.');
+
     if (splitting && remainder !== 0) {
       return setErr(
         '분할한 금액의 합이 총액과 안 맞아. ' +
@@ -301,9 +311,20 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
     setBusy('저장하는 중...'); setErr('');
     try {
       const saved = await DB.save(Object.assign({}, rec, { needs_review: false }), ledgerId, session);
+
       if (blob) {
         setBusy('사진 올리는 중...');
-        await DB.uploadImage(ledgerId, saved.id, blob);
+        try {
+          await DB.uploadImage(ledgerId, saved.id, blob);
+        } catch (imgEx) {
+          // 영수증 자체는 이미 저장됐다. 사진만 실패한 걸로 전체를 되돌리면
+          // 방금 입력한 내용을 다시 치게 만드는 셈이라 더 나쁘다.
+          setBusy('');
+          setErr('영수증은 저장됐는데 사진만 못 올렸어: ' +
+                 (imgEx.message || '알 수 없는 오류') +
+                 ' — 목록에서 그 영수증을 열어 사진만 다시 넣으면 돼.');
+          return;
+        }
       }
       onDone();
     } catch (ex) {
@@ -332,10 +353,17 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
         <button className="rv-btn-sm" onClick={save} disabled={!!busy}>저장</button>
       </div>
 
-      <div className="rv-body">
-        {busy && <Spinner label={busy} />}
-        {err && <Banner kind="error" onClose={() => setErr('')}>{err}</Banner>}
+      {/* 화면 아래에 붙는 알림.
+          예전에는 폼 맨 위에 띄웠는데, 저장 버튼은 맨 아래에 있어서
+          메시지가 화면 밖에 있었다. 눌러도 아무 일 없는 것처럼 보이는 원인이었다. */}
+      {(busy || err) && (
+        <div className={'rv-fixed-note ' + (err ? 'rv-fixed-err' : 'rv-fixed-busy')}>
+          <div>{err || busy}</div>
+          {err && <button className="rv-banner-x" onClick={() => setErr('')}>✕</button>}
+        </div>
+      )}
 
+      <div className="rv-body">
         {rec.needs_review && (
           <Banner kind="warn">
             AI가 채운 값이야. 금액과 날짜만 눈으로 확인하고 저장해줘.
@@ -477,6 +505,32 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
                     value={rec.notes || ''} onChange={(e) => set('notes', e.target.value)} />
         </label>
 
+        {/* 세무사에게 나가는 자료는 영문이어야 한다.
+            가맹점이나 메모가 한글이면 여기에 영문 표기를 남겨둔다. */}
+        {(hasKorean(rec.merchant) || hasKorean(rec.notes) || rec.merchant_en || rec.notes_en) && (
+          <div className="rv-en-box">
+            <div className="rv-en-head">세무사용 영문 표기</div>
+            <p className="rv-muted rv-small">
+              한글이 섞여 있어. 세무사에게 보내는 PDF와 CSV에는 아래 영문이 대신 나가.
+              비워두면 원래 글자가 그대로 나가서 못 읽어.
+            </p>
+            {hasKorean(rec.merchant) && (
+              <label className="rv-label">가맹점 (영문)
+                <input className="rv-input" placeholder="예: Hankook Market"
+                       value={rec.merchant_en || ''}
+                       onChange={(e) => set('merchant_en', e.target.value)} />
+              </label>
+            )}
+            {hasKorean(rec.notes) && (
+              <label className="rv-label">메모 (영문)
+                <input className="rv-input" placeholder="예: thread and dye"
+                       value={rec.notes_en || ''}
+                       onChange={(e) => set('notes_en', e.target.value)} />
+              </label>
+            )}
+          </div>
+        )}
+
         {Number(rec.total) > 0 && (
           <div className="rv-deduct">
             공제 반영액 <strong>{U.money(dedu)}</strong>
@@ -484,7 +538,9 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
           </div>
         )}
 
-        <button className="rv-btn rv-wide" onClick={save} disabled={!!busy}>저장</button>
+        <button className="rv-btn rv-wide" onClick={save} disabled={!!busy}>
+          {busy || '저장'}
+        </button>
       </div>
     </div>
   );
@@ -648,6 +704,13 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
     return m ? U.shortName(m.email) : '—';
   }, [members]);
 
+  // 세무사가 읽을 자료라 영문 표기가 있으면 그걸 쓴다.
+  const en = (r, field) => (r[field + '_en'] || r[field] || '');
+
+  const koreanLeft = rows.filter(
+    (r) => (hasKorean(r.merchant) && !r.merchant_en) || (hasKorean(r.notes) && !r.notes_en)
+  ).length;
+
   function exportCsv() {
     // 세무사가 읽을 파일이라 열 이름도 분류명도 전부 영문이다.
     // 분할된 영수증은 줄마다 한 행이 되고, receipt_total 이 같은 값으로 반복돼
@@ -661,13 +724,13 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
       const parts = U.lines(r);
       parts.forEach((l) => {
         out.push([
-          r.purchased_at, r.merchant, l.cat.line, l.cat.en,
+          r.purchased_at, en(r, 'merchant'), l.cat.line, l.cat.en,
           U.plain(l.amount), r.business_pct, U.plain(l.deductible),
           U.plain(r.total), r.tax == null ? '' : U.plain(r.tax),
           r.payment_method || '',
           parts.length > 1 ? 'yes' : '',
           nameFor(r.created_by),
-          [l.note, r.notes].filter(Boolean).join(' / '),
+          [l.note, en(r, 'notes')].filter(Boolean).join(' / '),
           r.image_path ? 'on file' : '',
         ].map(U.csvCell).join(','));
       });
@@ -708,6 +771,12 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
             인쇄 화면에서 <strong>대상</strong>을 <strong>PDF로 저장</strong>으로 바꾸면 파일로 떨어져.
             아래 보이는 그대로 나와. 세무사에게는 이 PDF 한 장과 CSV를 같이 보내면 돼.
           </p>
+          {koreanLeft > 0 && (
+            <Banner kind="warn">
+              한글이 그대로 남은 영수증이 {koreanLeft}건 있어. CSV에 한글로 나가서 세무사가 못 읽어.
+              그 영수증을 열어 <strong>세무사용 영문 표기</strong>를 채워줘.
+            </Banner>
+          )}
         </div>
 
         {/* 여기부터가 인쇄되는 영역 */}

@@ -139,6 +139,8 @@ create table if not exists public.receipts (
 
   purchased_at  date not null,                 -- 거래일
   merchant      text not null default '',      -- 가맹점
+  merchant_en   text,                          -- 세무사용 영문 표기 (없으면 merchant 를 그대로 씀)
+  notes_en      text,                          -- 세무사용 영문 메모
   category      text not null default 'other', -- js/categories.js 의 key
   total         numeric(12,2) not null default 0,
   tax           numeric(12,2),                 -- sales tax (알면 기록, 몰라도 됨)
@@ -167,6 +169,10 @@ create table if not exists public.receipts (
 );
 
 -- 이미 만들어 둔 뒤 이 파일을 다시 돌리는 경우를 위해
+-- 세무사에게 나가는 자료는 영문이어야 한다. 한글 영수증의 영문 표기를 따로 담는다.
+alter table public.receipts add column if not exists merchant_en text;
+alter table public.receipts add column if not exists notes_en    text;
+
 alter table public.receipts add column if not exists splits     jsonb;
 alter table public.receipts add column if not exists ledger_id  uuid references public.ledgers(id) on delete cascade;
 alter table public.receipts add column if not exists created_by uuid references auth.users(id);
