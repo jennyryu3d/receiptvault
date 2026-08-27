@@ -140,6 +140,80 @@ function SignIn() {
 }
 
 // =================================================================
+// 장부 막대 — 앱 맨 위에 늘 보인다
+// =================================================================
+//
+// 왜 설정 안이 아니라 여기인가:
+//   지금 어느 장부에 넣고 있는지가 안 보이면 공방 영수증을 리모델링 장부에
+//   넣어버린다. 그건 나중에 세무사 자료가 틀리는 사고다.
+//   그리고 장부를 오가는 건 설정이 아니라 일상 동작이다.
+
+function LedgerBar({ ledger, ledgers, onOpen }) {
+  const K = window.RV_KIND(ledger.kind);
+  return (
+    <button className="rv-ledgerbar" onClick={onOpen}>
+      <span className="rv-ledgerbar-dot" data-scope={K.taxScope} />
+      <span className="rv-ledgerbar-name">{ledger.name}</span>
+      <span className="rv-ledgerbar-kind">{K.ko}</span>
+      <span className="rv-ledgerbar-caret">▾</span>
+      {ledgers.length > 1 && (
+        <span className="rv-ledgerbar-n">{ledgers.length}</span>
+      )}
+    </button>
+  );
+}
+
+// 장부 고르기. 아래에서 올라오는 판.
+function LedgerSheet({ ledger, ledgers, onPick, onNew, onClose }) {
+  // 세금 성격으로 묶어서 보여준다 — 전체 앱 지도가 한눈에 보이게
+  const groups = [];
+  ledgers.forEach((l) => {
+    const sc = window.RV_KIND(l.kind).taxScope;
+    const g = groups.find((x) => x.scope === sc);
+    if (g) g.items.push(l); else groups.push({ scope: sc, items: [l] });
+  });
+
+  return (
+    <div className="rv-sheet-back" onClick={onClose}>
+      <div className="rv-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rv-sheet-grip" />
+        <div className="rv-sheet-title"><L k="ledger" /></div>
+
+        {groups.map((g) => (
+          <div key={g.scope} className="rv-sheet-group">
+            <div className="rv-scope">{window.RV_TAX_SCOPES[g.scope].ko}</div>
+            {g.items.map((l) => {
+              const K = window.RV_KIND(l.kind);
+              const on = l.id === ledger.id;
+              return (
+                <button key={l.id}
+                        className={'rv-sheet-item' + (on ? ' rv-sheet-on' : '')}
+                        onClick={() => { onPick(l.id); onClose(); }}>
+                  <span className="rv-ledgerbar-dot" data-scope={K.taxScope} />
+                  <span className="rv-sheet-name">
+                    {l.name}
+                    <span className="rv-sheet-kind">{K.en} · {K.ko}</span>
+                  </span>
+                  {on && <span className="rv-sheet-check">✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+
+        <button className="rv-btn-ghost rv-wide" onClick={() => { onClose(); onNew(); }}>
+          + 새 장부 만들기
+        </button>
+        <p className="rv-muted rv-small">
+          장부끼리는 자료도 보고서도 섞이지 않아. 같이 쓰는 사람도 장부마다 따로야.
+        </p>
+        <button className="rv-btn-ghost rv-wide" onClick={onClose}>닫기</button>
+      </div>
+    </div>
+  );
+}
+
+// =================================================================
 // 장부가 아직 없을 때
 // =================================================================
 
@@ -545,6 +619,12 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
         <button className="rv-btn-ghost" onClick={onCancel}><L k="cancel" /></button>
         <strong><L k={editing ? 'editReceipt' : 'addReceipt'} /></strong>
         <button className="rv-btn-sm" onClick={save} disabled={!!busy}><L k="save" /></button>
+      </div>
+
+      {/* 어느 장부에 저장되는지. 장부를 잘못 고른 채 한참 입력하는 걸 막는다. */}
+      <div className="rv-inledger">
+        <span className="rv-ledgerbar-dot" data-scope={P.taxScope} />
+        {ledger.name}에 저장돼
       </div>
 
       {/* 화면 아래에 붙는 알림.
@@ -1505,7 +1585,7 @@ function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
 // 설정 — 장부, 식구, 세무사 자료에 찍힐 이름
 // =================================================================
 
-function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onNewLedger, onReload }) {
+function Settings({ session, ledger, members, isOwner, onReload }) {
   const KIND = window.RV_KIND(ledger.kind);
   const SET = window.RV_CAT_SETS[
     KIND.catSets.indexOf(ledger.cat_set) >= 0 ? ledger.cat_set : KIND.catSets[0]];
@@ -1527,7 +1607,7 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onNewL
 
   async function doHardRefresh() {
     setRefreshing(true);
-    await window.RV_APP.hardRefresh();
+    await window.RV_APP.hardRefresh('settings');
   }
 
   const loadInvites = useCallback(async () => {
@@ -1583,19 +1663,6 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onNewL
         {msg && <Banner kind="info" onClose={() => setMsg('')}>{msg}</Banner>}
         {err && <Banner kind="error" onClose={() => setErr('')}>{err}</Banner>}
 
-        {ledgers.length > 1 && (
-          <label className="rv-label"><L k="switchLedger" />
-            <select className="rv-input" value={ledger.id}
-                    onChange={(e) => onSwitch(e.target.value)}>
-              {ledgers.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name} — {window.RV_KIND(l.kind).ko}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
         {/* ---- 장부 정보 ---- */}
         <h3 className="rv-h3">장부</h3>
         <div className="rv-kindtag">
@@ -1630,13 +1697,10 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onNewL
           </p>
         )}
 
-        <button className="rv-btn-ghost rv-wide" onClick={onNewLedger}>
-          + 장부 하나 더 만들기
-        </button>
         <p className="rv-muted rv-small">
+          장부를 바꾸거나 새로 만드는 건 <strong>맨 위 장부 이름</strong>을 눌러서 해.
           성격이 다른 지출은 장부를 나누는 게 좋아 — 공방 경비와 집 리모델링은 세금 계산이
-          아예 달라서 한 장부에 섞이면 둘 다 못 쓰게 돼. 장부끼리는 자료도 보고서도 분리돼 있고,
-          같이 쓰는 사람도 장부마다 따로 정해.
+          아예 달라서 한 장부에 섞이면 둘 다 못 쓰게 돼.
         </p>
 
         {/* ---- 식구 ---- */}
@@ -1785,7 +1849,14 @@ function App() {
   const [ledgers, setLedgers] = useState([]);
   const [ledgerId, setLedgerId] = useState(null);
   const [members, setMembers] = useState([]);
-  const [tab, setTab] = useState('list');
+  // 강제 갱신으로 돌아왔으면 누르기 전 화면으로 되돌린다
+  const [tab, setTab] = useState(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('tab');
+      return ['list', 'report', 'settings'].indexOf(t) >= 0 ? t : 'list';
+    } catch (e) { return 'list'; }
+  });
+  const [sheet, setSheet] = useState(false);   // 장부 고르는 판이 열렸나
   const [mode, setMode] = useState(null);            // null | add | edit | detail | tax
   const [current, setCurrent] = useState(null);
   const [rows, setRows] = useState([]);
@@ -1943,6 +2014,18 @@ function App() {
 
   return (
     <div className="rv-app">
+      {/* 어느 장부를 보고 있는지 — 늘 맨 위에 */}
+      <LedgerBar ledger={ledger} ledgers={ledgers} onOpen={() => setSheet(true)} />
+
+      {sheet && (
+        <LedgerSheet
+          ledger={ledger} ledgers={ledgers}
+          onPick={(id) => { DB.rememberLedger(id); setLedgerId(id); setMode(null); }}
+          onNew={() => setMode('newledger')}
+          onClose={() => setSheet(false)}
+        />
+      )}
+
       {err && <Banner kind="error" onClose={() => setErr('')}>{err}</Banner>}
 
       {tab === 'list' && (
@@ -1960,11 +2043,8 @@ function App() {
 
       {tab === 'settings' && (
         <Settings
-          session={session} ledger={ledger} ledgers={ledgers} members={members}
-          isOwner={isOwner}
-          onSwitch={(id) => { DB.rememberLedger(id); setLedgerId(id); }}
-          onNewLedger={() => setMode('newledger')}
-          onReload={boot}
+          session={session} ledger={ledger} members={members}
+          isOwner={isOwner} onReload={boot}
         />
       )}
 

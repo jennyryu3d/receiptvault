@@ -672,7 +672,9 @@
     // 캐시와 서비스워커를 통째로 비우고 새로 받는다.
     // 태블릿에는 개발자 도구가 없어서 "고쳤는데 안 바뀐다" 를 풀 방법이 마땅치 않다.
     // 이 버튼이 그 역할을 한다.
-    hardRefresh: async function () {
+    // 강제 갱신. 누른 화면으로 되돌아오게 tab 을 주소에 실어 보낸다 —
+    // 설정에서 눌렀는데 영수증 목록으로 떨어지면 "뭐가 된 거지" 하게 된다.
+    hardRefresh: async function (tab) {
       try {
         if ('serviceWorker' in navigator) {
           var regs = await navigator.serviceWorker.getRegistrations();
@@ -686,7 +688,8 @@
         }
       } catch (e) {}
       // 주소에 시각을 붙여 브라우저 캐시까지 확실히 우회한다
-      window.location.replace(window.location.pathname + '?fresh=' + Date.now());
+      var q = '?fresh=' + Date.now() + (tab ? '&tab=' + encodeURIComponent(tab) : '');
+      window.location.replace(window.location.pathname + q);
     },
 
     // 무엇이 연결돼 있고 무엇이 안 됐는지. 문제가 생겼을 때 여기부터 본다.
