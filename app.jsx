@@ -6,7 +6,6 @@ const { useState, useEffect, useMemo, useRef, useCallback } = React;
 const U = window.RV_UTIL;
 const DB = window.RV_DB;
 const AI = window.RV_AI;
-const CATS = window.RV_CATEGORIES;
 
 // =================================================================
 // 작은 조각들
@@ -57,26 +56,29 @@ function CountryTag({ code }) {
 function CategoryPill({ catKey }) {
   const c = window.RV_CAT(catKey);
   return (
-    <span className={'rv-pill rv-pill-' + c.group} title={c.en + ' · line ' + c.line}>
+    <span className={'rv-pill rv-pill-' + c.group}
+          title={c.en + (c.line ? ' · line ' + c.line : '')}>
       {c.ko}
     </span>
   );
 }
 
 // 분류 선택 드롭다운. 원가/경비를 optgroup 으로 갈라 놓는다.
-function CategorySelect({ value, onChange }) {
+// 분류 목록도 그 묶음 이름도 장부가 정한다. 여기서는 종류를 하나도 모른다.
+function CategorySelect({ value, onChange, ledger }) {
+  const cats = window.RV_CATS(ledger);
+  const sections = window.RV_KIND(ledger.kind).report.sections;
   return (
     <select className="rv-input" value={value} onChange={(e) => onChange(e.target.value)}>
-      <optgroup label="매출원가 — 팔 물건에 들어간 것">
-        {CATS.filter((c) => c.group === 'cogs').map((c) => (
-          <option key={c.key} value={c.key}>{c.ko}</option>
-        ))}
-      </optgroup>
-      <optgroup label="경비">
-        {CATS.filter((c) => c.group === 'expense').map((c) => (
-          <option key={c.key} value={c.key}>{c.ko}</option>
-        ))}
-      </optgroup>
+      {sections.map((sec) => {
+        const items = cats.filter((c) => c.group === sec.group);
+        if (!items.length) return null;
+        return (
+          <optgroup key={sec.group} label={sec.pick || sec.title}>
+            {items.map((c) => <option key={c.key} value={c.key}>{c.ko}</option>)}
+          </optgroup>
+        );
+      })}
     </select>
   );
 }
@@ -141,15 +143,33 @@ function SignIn() {
 // 장부가 아직 없을 때
 // =================================================================
 
-function StartLedger({ session, onMade }) {
-  const [name, setName] = useState('우리 공방');
+// 첫 장부를 만들 때도, 나중에 장부를 하나 더 만들 때도 같은 화면을 쓴다.
+// onCancel 이 있으면 "하나 더 만드는 중"이라 뒤로 갈 수 있다.
+function StartLedger({ session, onMade, onCancel }) {
+  const [kind, setKind] = useState('business');
+  const [catSet, setCatSet] = useState(null);
+  const [name, setName] = useState(window.RV_KIND('business').defaultName);
+  const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+
+  // 고를 수 있는 종류는 프로필 표에서 그대로 온다.
+  // 나중에 종류가 늘어나면 이 화면은 손댈 필요가 없다.
+  const kinds = Object.keys(window.RV_PROFILES);
+  const sets = window.RV_CAT_SET_LIST(kind);
+  const chosenSet = catSet && sets.some((x) => x.key === catSet) ? catSet : sets[0].key;
+
+  // 종류를 고르면 이름을 그럴듯하게 바꿔준다. 직접 고친 뒤에는 건드리지 않는다.
+  function pickKind(k) {
+    setKind(k);
+    setCatSet(null);
+    if (!touched) setName(window.RV_KIND(k).defaultName);
+  }
 
   async function make() {
     setBusy(true); setErr('');
     try {
-      const l = await DB.createLedger(session, name.trim() || '우리 공방');
+      const l = await DB.createLedger(session, name.trim() || '새 장부', kind, chosenSet);
       onMade(l);
     } catch (ex) {
       setErr(ex.message || '장부를 만들지 못했어요.');
@@ -157,20 +177,71 @@ function StartLedger({ session, onMade }) {
     }
   }
 
+  // 세금 성격이 같은 것끼리 묶어서 보여준다 (신고에 들어가는 것 / 나중 것 / 무관한 것)
+  const byScope = [];
+  kinds.forEach((k) => {
+    const sc = window.RV_KIND(k).taxScope;
+    const found = byScope.find((g) => g.scope === sc);
+    if (found) found.keys.push(k);
+    else byScope.push({ scope: sc, keys: [k] });
+  });
+
   return (
     <div className="rv-center">
       <div className="rv-card">
         <div className="rv-logo">장부 만들기</div>
         <p className="rv-muted rv-small">
-          영수증이 쌓이는 곳이야. 하나만 만들어 두고, 나중에 설정에서 다른 사람을 불러
-          같이 쓸 수 있어.
+          영수증이 쌓이는 곳이야. 성격이 다른 지출은 장부를 따로 만들면 돼 —
+          장부끼리는 자료도 보고서도 섞이지 않아.
         </p>
+
+        {byScope.map((g) => (
+          <div key={g.scope} className="rv-kinds">
+            <div className="rv-scope">{window.RV_TAX_SCOPES[g.scope].ko}</div>
+            {g.keys.map((k) => {
+              const K = window.RV_KIND(k);
+              return (
+                <button key={k}
+                        className={'rv-kind' + (kind === k ? ' rv-kind-on' : '')}
+                        onClick={() => pickKind(k)}>
+                  <div className="rv-kind-t">{K.en} <span className="rv-kind-ko">{K.ko}</span></div>
+                  <div className="rv-muted rv-small">{K.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+
+        {/* 같은 종류 안에서 업종이 여럿이면 분류표를 고른다.
+            하나뿐이면 물어볼 게 없으니 아예 안 보여준다. */}
+        {sets.length > 1 && (
+          <label className="rv-label">분류표 (업종)
+            <select className="rv-input" value={chosenSet}
+                    onChange={(e) => setCatSet(e.target.value)}>
+              {sets.map((x) => (
+                <option key={x.key} value={x.key}>{x.ko} · {x.en}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <label className="rv-label">장부 이름
-          <input className="rv-input" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="rv-input" value={name}
+                 onChange={(e) => { setTouched(true); setName(e.target.value); }} />
         </label>
+
+        <p className="rv-muted rv-small">
+          종류와 분류표는 만든 뒤에 바꿀 수 없어. 이미 넣은 영수증이 그 분류를 가리키게 되거든.
+        </p>
+
         <button className="rv-btn" onClick={make} disabled={busy}>
           {busy ? '만드는 중...' : '만들기'}
         </button>
+        {onCancel && (
+          <button className="rv-btn-ghost rv-wide" onClick={onCancel} disabled={busy}>
+            취소
+          </button>
+        )}
         {err && <Banner kind="error">{err}</Banner>}
       </div>
     </div>
@@ -194,6 +265,7 @@ const BLANK = {
   category: 'cogs_material',
   tax: '',
   payment_method: 'card',
+  payment_ref: '',
   business_pct: 100,
   notes: '',
   notes_en: '',
@@ -201,8 +273,16 @@ const BLANK = {
   splits: [],
 };
 
-function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
-  const [rec, setRec] = useState(() => Object.assign({}, BLANK, initial || {}));
+function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }) {
+  const ledgerId = ledger.id;
+  const P = window.RV_KIND(ledger.kind);      // 장부 종류가 화면을 정한다
+  const F = P.form;
+  const [rec, setRec] = useState(() => Object.assign(
+    {}, BLANK,
+    // 장부마다 분류표가 다르니 처음 골라져 있는 값도 달라야 한다
+    { category: window.RV_FIRST_CAT(ledger.kind, ledger.cat_set) },
+    initial || {}
+  ));
   const [blob, setBlob] = useState(null);        // 새로 고른 이미지
   const [preview, setPreview] = useState(null);  // 화면에 보여줄 URL
   const [busy, setBusy] = useState('');
@@ -351,7 +431,7 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
 
       if (AI.available()) {
         setBusy('영수증 읽는 중...');
-        const got = await AI.extract(small, ledgerId);
+        const got = await AI.extract(small, ledgerId, ledger);
 
         // AI가 제안한 분할은 그대로 믿지 않는다.
         // 분류 key 가 실제로 있고, 합계가 총액과 맞을 때만 받아들인다.
@@ -384,6 +464,9 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
           amount_original: got.amount != null ? String(got.amount) : r.amount_original,
           tax: got.tax != null ? String(got.tax) : r.tax,
           payment_method: got.payment_method || r.payment_method,
+          // 어느 카드였는지. 명세서와 대조할 때 쓰는 값이라 자동으로 채우고,
+          // 틀리면 손으로 고칠 수 있게 그냥 글자로 둔다.
+          payment_ref: U.cleanPaymentRef(got.payment_ref) || r.payment_ref || '',
           category: got.category && window.RV_CAT_BY_KEY[got.category] ? got.category : r.category,
           ai_raw: got,
           needs_review: true,
@@ -590,7 +673,7 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
         {!splitting ? (
           <>
             <label className="rv-label"><L k="category" />
-              <CategorySelect value={rec.category} onChange={(v) => set('category', v)} />
+              <CategorySelect value={rec.category} ledger={ledger} onChange={(v) => set('category', v)} />
             </label>
             <p className="rv-muted rv-small">
               Schedule C {cat.line}번 · {cat.en}
@@ -621,7 +704,7 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
               return (
                 <div key={i} className="rv-split-row">
                   <div className="rv-split-top">
-                    <CategorySelect value={s.category} onChange={(v) => setSplit(i, 'category', v)} />
+                    <CategorySelect value={s.category} ledger={ledger} onChange={(v) => setSplit(i, 'category', v)} />
                     <button className="rv-split-x" onClick={() => removeSplit(i)} title="이 줄 지우기">✕</button>
                   </div>
                   <div className="rv-split-bottom">
@@ -662,28 +745,43 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
               <option value="other">Other · 기타</option>
             </select>
           </label>
-          <label className="rv-label rv-grow"><L k="businessUse" />
-            <input className="rv-input" type="number" min="0" max="100" step="5"
-                   value={rec.business_pct}
-                   onChange={(e) => set('business_pct', e.target.value)} />
+          {/* 사업 사용 비율은 그 개념이 있는 장부에만 뜬다.
+              리모델링이나 개인 기록에는 "몇 % 사업용" 이라는 게 없다. */}
+          {F.businessPct && (
+            <label className="rv-label rv-grow"><L k="businessUse" />
+              <input className="rv-input" type="number" min="0" max="100" step="5"
+                     value={rec.business_pct}
+                     onChange={(e) => set('business_pct', e.target.value)} />
+            </label>
+          )}
+          {/* 어느 카드로 냈는지. 예전에 쓴 표기가 아래 목록으로 뜬다. */}
+          <label className="rv-label rv-grow"><L k="paymentRef" />
+            <input className="rv-input" list="rv-payrefs" placeholder="Visa ...4821"
+                   value={rec.payment_ref || ''}
+                   onChange={(e) => set('payment_ref', e.target.value)} />
+            <datalist id="rv-payrefs">
+              {(paymentRefs || []).map((p) => <option key={p} value={p} />)}
+            </datalist>
           </label>
         </div>
-        {Number(rec.business_pct) < 100 && (
+        {F.businessPct && Number(rec.business_pct) < 100 && (
           <p className="rv-muted rv-small">
             개인 겸용 지출이라 {rec.business_pct}%만 사업 경비로 잡혀.
           </p>
         )}
+        <p className="rv-muted rv-small">
+          카드 표기는 영수증에서 자동으로 채워지고, 틀리면 고치면 돼. 나중에 카드 명세서와
+          한 줄씩 맞출 때 이게 있어야 편해. 카드번호 전체는 저장되지 않아 — 끝 4자리까지만이야.
+        </p>
 
-        {/* 사업 목적은 IRS가 요구하는 기록 항목이다. 메모가 아니라 이게 본명이다. */}
-        <label className="rv-label"><L k="purpose" />
+        {/* 사업 장부에서는 IRS가 요구하는 기록 항목이고, 부동산 장부에서는
+            개량인지 수리인지를 가르는 근거다. 라벨과 설명은 장부가 정한다. */}
+        <label className="rv-label"><L k={F.purposeLabel} />
           <textarea className="rv-input" rows="2" spellCheck="true"
-                    placeholder="무엇을 왜 샀는지 — 예: 가방 제작용 가죽과 실"
+                    placeholder={F.purposePlaceholder}
                     value={rec.notes || ''} onChange={(e) => set('notes', e.target.value)} />
         </label>
-        <p className="rv-muted rv-small">
-          비워두면 나중에 세무사가 "이건 무슨 지출이죠?" 하고 되물어. 국세청이 요구하는
-          기록 항목이기도 해 — 날짜·금액·상호·<strong>사업 목적</strong> 네 가지야.
-        </p>
+        <p className="rv-muted rv-small">{F.purposeHelp}</p>
         {cat.key === 'meals' && (
           <Banner kind="warn">
             식비는 기록 요건이 하나 더 있어 — <strong>누구와 함께했고 무슨 논의를 했는지</strong>를
@@ -719,8 +817,13 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
 
         {originalAmount > 0 && (
           <div className="rv-deduct">
-            <L k="deductible" /> <strong>{U.money(dedu)}</strong>
-            {halfOnly && <span className="rv-muted"> (식비는 50%만 인정)</span>}
+            <span className="rv-deduct-k">{P.counted.en}</span>{' '}
+            <span className="rv-deduct-ko">{P.counted.ko}</span>{' '}
+            <strong>{U.money(dedu)}</strong>
+            {halfOnly && dedu > 0 && <span className="rv-muted"> (식비는 50%만 인정)</span>}
+            {dedu === 0 && (
+              <span className="rv-muted"> (이 분류는 합계에 안 들어가 — 기록만 남아)</span>
+            )}
           </div>
         )}
 
@@ -817,23 +920,27 @@ function ReceiptList({ rows, loading, onOpen, onAdd, year, years, onYear, canWri
 // 정리 (화면용 리포트)
 // =================================================================
 
-function Report({ rows, year, onTaxDoc }) {
+function Report({ rows, year, ledger, onTaxDoc }) {
   const s = useMemo(() => U.summarize(rows), [rows]);
+  const P = window.RV_KIND(ledger.kind);
 
-  function Section({ title, note, items }) {
+  function Section({ title, note, items, gross }) {
     if (items.length === 0) return null;
+    // 합계에 안 잡히는 칸(수리·가구 등)은 합계도 "쓴 돈"으로 보여준다.
+    // 반영액으로 보여주면 늘 0이라 무슨 뜻인지 알 수가 없다.
+    const total = gross ? items.reduce((t, e) => t + e.gross, 0) : U.sum(items);
     return (
       <div className="rv-report-sec">
         <div className="rv-report-head">
           <span>{title}</span>
-          <strong>{U.money(U.sum(items))}</strong>
+          <strong>{U.money(total)}</strong>
         </div>
         {note && <p className="rv-muted rv-small">{note}</p>}
         <table className="rv-table">
           <tbody>
             {items.map((e) => (
               <tr key={e.cat.key}>
-                <td className="rv-line">{e.cat.line}</td>
+                {P.lineLabel && <td className="rv-line">{e.cat.line}</td>}
                 <td>
                   <div>{e.cat.ko}</div>
                   <div className="rv-muted rv-small">{e.cat.en} · {e.n}건</div>
@@ -858,23 +965,20 @@ function Report({ rows, year, onTaxDoc }) {
         <span />
         <strong>{year}년 정리</strong>
         <button className="rv-btn-sm" onClick={onTaxDoc} disabled={rows.length === 0}>
-          세무사 자료
+          {P.doc.screenTitle}
         </button>
       </div>
       <div className="rv-body">
         {rows.length === 0 && <div className="rv-empty"><p>이 해에는 자료가 없어.</p></div>}
-        <Section title="매출원가 (Schedule C Part III)"
-                 note="판매할 물건에 직접 들어간 재료."
-                 items={s.cogs} />
-        <Section title="경비 (Schedule C Part II)"
-                 note="신고서와 같은 줄번호 순서로 정렬돼 있어."
-                 items={s.expense} />
+
+        {/* 어떤 칸이 몇 개 나오는지는 장부 종류가 정한다 */}
+        {P.report.sections.map((sec) => (
+          <Section key={sec.group} title={sec.title} note={sec.note}
+                   gross={!!sec.gross} items={s.group(sec.group)} />
+        ))}
+
         {rows.length > 0 && (
-          <p className="rv-muted rv-small rv-foot">
-            표시된 금액은 사업 사용 비율과 식비 50% 규칙을 반영한 <strong>공제 반영액</strong>이야.
-            실제 지출액이 다르면 아래에 함께 표시돼. 신고 전에는 회계사와 한 번 맞춰보는 걸 권해 —
-            나는 세무 자문을 할 수 있는 입장이 아니야.
-          </p>
+          <p className="rv-muted rv-small rv-foot">{P.report.foot}</p>
         )}
       </div>
     </div>
@@ -886,10 +990,48 @@ function Report({ rows, year, onTaxDoc }) {
 // =================================================================
 
 function TaxDoc({ rows, year, ledger, members, onBack }) {
+  const P = window.RV_KIND(ledger.kind);       // 문서 생김새는 전부 여기서 온다
+  const D = P.doc;
+  const C = P.csv;
   const s = useMemo(() => U.summarize(rows), [rows]);
-  const cogsTotal = U.sum(s.cogs);
-  const expTotal = U.sum(s.expense);
   const prepared = U.today();
+
+  // 각 칸의 합계. gross 인 칸은 "쓴 돈", 아니면 "인정되는 금액".
+  const sectionTotal = (sec) => {
+    const items = s.group(sec.group);
+    return sec.gross ? items.reduce((t, e) => t + e.gross, 0) : U.sum(items);
+  };
+  // 문서 맨 아래 총계는 gross 칸을 빼고 더한다 (공제액에 수리비를 더하면 안 되니까)
+  const grandTotal = D.sections
+    .filter((sec) => !sec.gross)
+    .reduce((t, sec) => t + sectionTotal(sec), 0);
+
+  // 누적 표가 필요한 장부(집 공사 같은)는 전체 연도를 따로 불러온다.
+  // 취득원가는 공사 전체 기간에 걸쳐 쌓이고, 집을 팔 때 필요한 건 그 누적 금액이다.
+  const [allRows, setAllRows] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    if (!D.cumulative) return;
+    DB.list({ ledgerId: ledger.id }).then(
+      (all) => { if (alive) setAllRows(all); },
+      () => { if (alive) setAllRows([]); }
+    );
+    return () => { alive = false; };
+  }, [D.cumulative, ledger.id]);
+
+  const lifetime = useMemo(() => {
+    if (!allRows) return null;
+    const byYear = new Map();
+    allRows.forEach((r) => {
+      const y = String(r.purchased_at).slice(0, 4);
+      if (!byYear.has(y)) byYear.set(y, { y: y, n: 0, counted: 0 });
+      const e = byYear.get(y);
+      e.n += 1;
+      e.counted += U.deductible(r);
+    });
+    const years = Array.from(byYear.values()).sort((a, b) => a.y.localeCompare(b.y));
+    return { years: years, total: years.reduce((t, e) => t + e.counted, 0), n: allRows.length };
+  }, [allRows]);
 
   const nameFor = useCallback((uid) => {
     const m = members.find((x) => x.user_id === uid);
@@ -904,7 +1046,7 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
   ).length;
 
   const withImage = rows.filter((r) => r.image_path).length;
-  const hasHalf = s.expense.some((e) => e.cat.deduct < 1);
+  const hasHalf = rows.some((r) => U.lines(r).some((l) => l.cat.deduct > 0 && l.cat.deduct < 1));
   const hasPartial = rows.some((r) => r.business_pct < 100);
 
   // 외화로 산 것들 — 환율 근거를 문서에 남겨야 한다
@@ -913,19 +1055,21 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
   const manualFx = foreignRows.filter((r) => r.fx_source === 'manual').length;
 
   // 국세청이 요구하는 기록은 날짜·금액·상호·사업 목적 네 가지다.
-  // 앞의 셋은 저장할 때 강제되지만 사업 목적은 비어 있을 수 있어서 여기서 센다.
+  // 앞의 셋은 저장할 때 강제되지만 목적은 비어 있을 수 있어서 여기서 센다.
   const missingPurpose = rows.filter((r) => !(r.notes || '').trim() && !(r.notes_en || '').trim());
   const missingMerchant = rows.filter((r) => !(r.merchant || '').trim());
-  const mealsRows = rows.filter((r) => U.lines(r).some((l) => l.cat.key === 'meals'));
   const noImage = rows.filter((r) => !r.image_path);
-  const equipmentRows = rows.filter((r) => U.lines(r).some((l) => l.cat.key === 'equipment'));
-  const carRows = rows.filter((r) => U.lines(r).some((l) => l.cat.key === 'car'));
+  const hasCat = (key) => rows.filter((r) => U.lines(r).some((l) => l.cat.key === key));
+  const mealsRows = hasCat('meals');
+  const equipmentRows = hasCat('equipment');
+  const carRows = hasCat('car');
 
   const gaps = [];
   if (missingPurpose.length) gaps.push({
     n: missingPurpose.length,
-    what: '사업 목적이 비어 있는 영수증',
-    why: '날짜·금액·상호와 함께 국세청이 요구하는 네 가지 중 하나야. 비면 세무사가 되물어.',
+    what: P.form.purposeLabel === 'workDone' ? '무슨 공사였는지 비어 있는 영수증'
+                                             : '무슨 지출인지 비어 있는 영수증',
+    why: P.form.purposeHelp,
   });
   if (missingMerchant.length) gaps.push({
     n: missingMerchant.length, what: '가맹점 이름이 없는 영수증',
@@ -933,7 +1077,9 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
   });
   if (noImage.length) gaps.push({
     n: noImage.length, what: '사진이 없는 영수증',
-    why: '$75 넘는 지출은 증빙을 보관해야 해. 원본이 있으면 사진만 추가하면 돼.',
+    why: D.cumulative
+      ? '집을 팔 때까지 몇 년이고 보관해야 하는 증빙이야. 종이는 그때까지 안 남아 — 지금 찍어두는 게 나아.'
+      : '$75 넘는 지출은 증빙을 보관해야 해. 원본이 있으면 사진만 추가하면 돼.',
   });
   if (koreanLeft > 0) gaps.push({
     n: koreanLeft, what: '한글이 그대로 남은 영수증',
@@ -944,62 +1090,129 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
     // 세무사가 읽을 파일이라 열 이름도 분류명도 전부 영문이다.
     // 분할된 영수증은 줄마다 한 행이 되고, receipt_total 이 같은 값으로 반복돼
     // 어떤 행들이 한 장에서 나왔는지 알아볼 수 있다.
-    const head = ['date', 'merchant', 'country', 'schedule_c_line', 'category',
-                  'currency', 'amount_local', 'fx_rate', 'fx_rate_source', 'amount_usd',
-                  'business_use_pct', 'deductible_usd',
-                  'receipt_total_local', 'receipt_total_usd', 'sales_tax_local',
-                  'payment_method', 'split_of_receipt', 'business_purpose',
-                  'entered_by', 'entered_on', 'receipt_image'];
+    // 어떤 열이 있는지는 장부 종류가 정한다 (P.csv).
+    const head = ['date', C.merchantCol, 'country']
+      .concat(C.line ? ['schedule_c_line'] : [])
+      .concat(['category'])
+      .concat(C.basisFlag ? ['adds_to_basis'] : [])
+      .concat(['currency', 'amount_local', 'fx_rate', 'fx_rate_source', 'amount_usd'])
+      .concat(C.businessPct ? ['business_use_pct'] : [])
+      .concat([C.amountCol,
+               'receipt_total_local', 'receipt_total_usd', 'sales_tax_local',
+               'payment_method', 'payment_ref', 'split_of_receipt', C.purposeCol,
+               'entered_by', 'entered_on', 'receipt_image']);
     const out = [head.join(',')];
 
     rows.slice().sort((a, b) => a.purchased_at.localeCompare(b.purchased_at)).forEach((r) => {
       const parts = U.lines(r);
       parts.forEach((l) => {
-        out.push([
-          r.purchased_at, en(r, 'merchant'), r.country || '',
-          l.cat.line, l.cat.en,
-          r.currency || 'USD', U.plain(l.amount),
-          Number(r.fx_rate || 1).toFixed(8),
-          r.fx_source === 'manual' ? 'card statement'
-            : r.fx_source === 'same' ? 'n/a (USD)' : 'ECB published rate',
-          U.plain(l.usd),
-          r.business_pct, U.plain(l.deductible),
-          U.plain(U.originalTotal(r)), U.plain(r.total),
-          r.tax == null ? '' : U.plain(r.tax),
-          r.payment_method || '',
-          parts.length > 1 ? 'yes' : '',
-          [l.note, en(r, 'notes')].filter(Boolean).join(' / '),
-          nameFor(r.created_by),
-          r.created_at ? String(r.created_at).slice(0, 10) : '',
-          r.image_path ? 'on file' : '',
-        ].map(U.csvCell).join(','));
+        const row = [r.purchased_at, en(r, 'merchant'), r.country || '']
+          .concat(C.line ? [l.cat.line] : [])
+          .concat([l.cat.en])
+          .concat(C.basisFlag ? [l.cat.deduct > 0 ? 'yes' : 'no'] : [])
+          .concat([
+            r.currency || 'USD', U.plain(l.amount),
+            Number(r.fx_rate || 1).toFixed(8),
+            r.fx_source === 'manual' ? 'card statement'
+              : r.fx_source === 'same' ? 'n/a (USD)' : 'ECB published rate',
+            U.plain(l.usd),
+          ])
+          .concat(C.businessPct ? [r.business_pct] : [])
+          .concat([
+            U.plain(l.deductible),
+            U.plain(U.originalTotal(r)), U.plain(r.total),
+            r.tax == null ? '' : U.plain(r.tax),
+            r.payment_method || '', r.payment_ref || '',
+            parts.length > 1 ? 'yes' : '',
+            [l.note, en(r, 'notes')].filter(Boolean).join(' / '),
+            nameFor(r.created_by),
+            r.created_at ? String(r.created_at).slice(0, 10) : '',
+            r.image_path ? 'on file' : '',
+          ]);
+        out.push(row.map(U.csvCell).join(','));
       });
     });
 
     const blob = new Blob(['﻿' + out.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'ReceiptVault-' + year + '-detail.csv';
+    a.download = 'ReceiptVault-' + D.fileTag + year + '-detail.csv';
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
-  function Rows({ items }) {
+  function Rows({ items, gross }) {
     return items.map((e) => (
       <tr key={e.cat.key}>
-        <td className="tx-line">{e.cat.line}</td>
+        {P.lineLabel && <td className="tx-line">{e.cat.line}</td>}
         <td>{e.cat.en}</td>
         <td className="tx-num">{e.n}</td>
-        <td className="tx-num">{U.plain(e.deduct)}</td>
+        <td className="tx-num">{U.plain(gross ? e.gross : e.deduct)}</td>
       </tr>
     ));
+  }
+
+  // 문서 맨 아래 주석. 어떤 줄을 넣을지는 장부 종류가 고른다(D.notes).
+  function note(key) {
+    switch (key) {
+      case 'deductibleAmounts':
+        return <li key={key}>Amounts shown are <strong>deductible amounts</strong>, not gross spend.</li>;
+      case 'meals':
+        return hasHalf ? <li key={key}>Meals are reported at the 50% deductible rate.</li> : null;
+      case 'mixedUse':
+        return hasPartial ? (
+          <li key={key}>Mixed-use items (e.g. vehicle) are reduced by the recorded
+              business-use percentage. Per-receipt percentages are in the CSV.</li>
+        ) : null;
+      case 'equipment':
+        return equipmentRows.length ? (
+          <li key={key}><strong>Needs your decision:</strong> {equipmentRows.length} equipment
+              purchase{equipmentRows.length > 1 ? 's are' : ' is'} listed under line 13. These are
+              capital items — please advise on depreciation vs. Section 179 election.</li>
+        ) : null;
+      case 'car':
+        return carRows.length ? (
+          <li key={key}><strong>Incomplete:</strong> vehicle costs (line 9) are receipt-based only.
+              No mileage log is kept in this system.</li>
+        ) : null;
+      case 'notTrackedBusiness':
+        return <li key={key}><strong>Not tracked here:</strong> beginning and ending inventory
+            (Schedule C Part III), home-office expenses, and any non-receipt items such as
+            bank fees drawn directly from the account.</li>;
+      case 'basisIntro':
+        return <li key={key}>This is <strong>not a deduction schedule.</strong> The amounts above are
+            capital improvements to a personal residence, recorded to support an
+            adjusted-basis calculation when the home is sold (IRS Pub. 523).</li>;
+      case 'basisTest':
+        return <li key={key}>Classification follows the standard test — work that adds to the value
+            of the home, prolongs its useful life, or adapts it to new uses is treated as an
+            improvement; ordinary repairs and maintenance are recorded separately and excluded
+            from basis.</li>;
+      case 'basisRepairs':
+        return <li key={key}><strong>Needs review:</strong> repairs performed as part of the larger
+            remodel may themselves be capitalized. Items filed under repairs should be reviewed
+            against the scope of work before the basis figure is used.</li>;
+      case 'basisNotAdjusted':
+        return <li key={key}><strong>Not adjusted here:</strong> energy credits, rebates, insurance
+            reimbursements and subsidies received for this work reduce basis and are not netted
+            out in these figures. Improvements later removed or replaced should also be backed
+            out.</li>;
+      case 'basisNotIncluded':
+        return <li key={key}><strong>Not included:</strong> the original purchase price of the home,
+            settlement costs, and any prior improvements made before this record began.</li>;
+      case 'personalNote':
+        return <li key={key}>This record is kept for personal reference. It is not a tax schedule
+            and no deduction is claimed from it.</li>;
+      default:
+        return null;
+    }
   }
 
   return (
     <div className="rv-screen">
       <div className="rv-topbar rv-noprint">
         <button className="rv-btn-ghost" onClick={onBack}>← 정리</button>
-        <strong>세무사 자료</strong>
+        <strong>{D.screenTitle}</strong>
         <span />
       </div>
 
@@ -1009,7 +1222,7 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
           <button className="rv-btn-ghost rv-wide" onClick={exportCsv}>거래 내역 CSV 내려받기</button>
           <p className="rv-muted rv-small">
             인쇄 화면에서 <strong>대상</strong>을 <strong>PDF로 저장</strong>으로 바꾸면 파일로 떨어져.
-            아래 보이는 그대로 나와. 세무사에게는 이 PDF 한 장과 CSV를 같이 보내면 돼.
+            아래 보이는 그대로 나와. {D.intro}
           </p>
           {gaps.length > 0 && (
             <div className="rv-gaps">
@@ -1036,12 +1249,12 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
           <header className="tx-head">
             <div>
               <h1>{ledger.business_name || ledger.name}</h1>
-              <p className="tx-sub">Business Expense Summary — Tax Year {year}</p>
+              <p className="tx-sub">{D.title} {year}</p>
             </div>
             <table className="tx-meta">
               <tbody>
                 {ledger.taxpayer_name && (
-                  <tr><td>Taxpayer</td><td>{ledger.taxpayer_name}</td></tr>
+                  <tr><td>{P.entity.docOwner}</td><td>{ledger.taxpayer_name}</td></tr>
                 )}
                 <tr><td>Period</td><td>Jan 1 – Dec 31, {year}</td></tr>
                 <tr><td>Prepared</td><td>{prepared}</td></tr>
@@ -1052,56 +1265,76 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
             </table>
           </header>
 
-          {s.cogs.length > 0 && (
+          {/* 표는 장부 종류가 정한 만큼 나온다 */}
+          {D.sections.map((sec) => {
+            const items = s.group(sec.group);
+            if (!items.length) return null;
+            return (
+              <section className="tx-sec" key={sec.group}>
+                <h2>{sec.h2}</h2>
+                <table className="tx-table">
+                  <thead>
+                    <tr>
+                      {P.lineLabel && <th>Line</th>}
+                      <th>Category</th>
+                      <th className="tx-num">Items</th>
+                      <th className="tx-num">
+                        {sec.gross ? 'Spent (USD)' : 'Amount (USD)'}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <Rows items={items} gross={!!sec.gross} />
+                    <tr className="tx-total">
+                      {P.lineLabel && <td></td>}
+                      <td>{sec.total.replace('{year}', year)}</td>
+                      <td className="tx-num"></td>
+                      <td className="tx-num">{U.plain(sectionTotal(sec))}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            );
+          })}
+
+          {D.grand && (
             <section className="tx-sec">
-              <h2>Part III — Cost of Goods Sold</h2>
-              <table className="tx-table">
-                <thead>
-                  <tr><th>Line</th><th>Category</th><th className="tx-num">Items</th>
-                      <th className="tx-num">Amount (USD)</th></tr>
-                </thead>
+              <table className="tx-table tx-grand">
                 <tbody>
-                  <Rows items={s.cogs} />
                   <tr className="tx-total">
-                    <td></td><td>Total cost of goods sold</td>
-                    <td className="tx-num"></td>
-                    <td className="tx-num">{U.plain(cogsTotal)}</td>
+                    <td>{D.grand}</td>
+                    <td className="tx-num">{U.plain(grandTotal)}</td>
                   </tr>
                 </tbody>
               </table>
             </section>
           )}
 
-          {s.expense.length > 0 && (
+          {D.cumulative && lifetime && lifetime.years.length > 0 && (
             <section className="tx-sec">
-              <h2>Part II — Expenses</h2>
+              <h2>{D.cumulative.h2}</h2>
               <table className="tx-table">
                 <thead>
-                  <tr><th>Line</th><th>Category</th><th className="tx-num">Items</th>
-                      <th className="tx-num">Amount (USD)</th></tr>
+                  <tr><th>Year</th><th className="tx-num">Receipts</th>
+                      <th className="tx-num">{D.cumulative.col}</th></tr>
                 </thead>
                 <tbody>
-                  <Rows items={s.expense} />
+                  {lifetime.years.map((e) => (
+                    <tr key={e.y}>
+                      <td>{e.y}</td>
+                      <td className="tx-num">{e.n}</td>
+                      <td className="tx-num">{U.plain(e.counted)}</td>
+                    </tr>
+                  ))}
                   <tr className="tx-total">
-                    <td></td><td>Total expenses</td>
-                    <td className="tx-num"></td>
-                    <td className="tx-num">{U.plain(expTotal)}</td>
+                    <td>{D.cumulative.total}</td>
+                    <td className="tx-num">{lifetime.n}</td>
+                    <td className="tx-num">{U.plain(lifetime.total)}</td>
                   </tr>
                 </tbody>
               </table>
             </section>
           )}
-
-          <section className="tx-sec">
-            <table className="tx-table tx-grand">
-              <tbody>
-                <tr className="tx-total">
-                  <td>Total deductible, all categories</td>
-                  <td className="tx-num">{U.plain(cogsTotal + expTotal)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
 
           {foreignRows.length > 0 && (
             <section className="tx-sec">
@@ -1133,12 +1366,7 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
           <section className="tx-notes">
             <h3>Notes</h3>
             <ul>
-              <li>Amounts shown are <strong>deductible amounts</strong>, not gross spend.</li>
-              {hasHalf && <li>Meals (line 24b) are reported at the 50% deductible rate.</li>}
-              {hasPartial && (
-                <li>Mixed-use items (e.g. vehicle) are reduced by the recorded
-                    business-use percentage. Per-receipt percentages are in the CSV.</li>
-              )}
+              {D.notes.map((k) => note(k))}
               {foreignRows.length > 0 && (
                 <li>
                   {foreignRows.length} purchase{foreignRows.length > 1 ? 's were' : ' was'} made in{' '}
@@ -1152,26 +1380,14 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
                   provided on request.</li>
               {missingPurpose.length > 0 && (
                 <li><strong>{missingPurpose.length}</strong> receipt
-                    {missingPurpose.length > 1 ? 's have' : ' has'} no business purpose recorded.</li>
+                    {missingPurpose.length > 1 ? 's have' : ' has'} no description recorded.</li>
               )}
               {mealsRows.length > 0 && (
                 <li>Meals: attendees and business discussion are recorded in the business-purpose
                     field per receipt (see CSV).</li>
               )}
-              {equipmentRows.length > 0 && (
-                <li><strong>Needs your decision:</strong> {equipmentRows.length} equipment purchase
-                    {equipmentRows.length > 1 ? 's are' : ' is'} listed under line 13. These are
-                    capital items — please advise on depreciation vs. Section 179 election.</li>
-              )}
-              {carRows.length > 0 && (
-                <li><strong>Incomplete:</strong> vehicle costs (line 9) are receipt-based only.
-                    No mileage log is kept in this system.</li>
-              )}
-              <li><strong>Not tracked here:</strong> beginning and ending inventory
-                  (Schedule C Part III), home-office expenses, and any non-receipt items such as
-                  bank fees drawn directly from the account.</li>
-              <li>Category assignments were made by the taxpayer at entry and should be reviewed
-                  before filing.</li>
+              <li>Category assignments were made by the {D.reviewedBy} at entry and should be
+                  reviewed before {D.reviewedBefore}.</li>
             </ul>
           </section>
 
@@ -1188,10 +1404,15 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
 // 상세
 // =================================================================
 
-function Detail({ rec, members, canWrite, onEdit, onDeleted, onBack }) {
+function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
   const [url, setUrl] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const c = window.RV_CAT(rec.category);
+  const P = window.RV_KIND(ledger.kind);
+  // 신고서 줄번호가 있는 장부면 줄번호를, 없으면 합계에 잡히는지를 보여준다.
+  const catLine = (cc) => (P.lineLabel
+    ? P.lineLabel + ' ' + cc.line + '번 · ' + cc.en
+    : (cc.deduct > 0 ? '' : '합계에 안 들어감 · ') + cc.en);
 
   useEffect(() => {
     let alive = true;
@@ -1233,20 +1454,21 @@ function Detail({ rec, members, canWrite, onEdit, onDeleted, onBack }) {
               <div key={i} className="rv-split-line">
                 <div>
                   <div>{l.cat.ko}</div>
-                  <div className="rv-muted rv-small">Schedule C {l.cat.line}번 · {l.cat.en}</div>
+                  <div className="rv-muted rv-small">{catLine(l.cat)}</div>
                 </div>
                 <div className="rv-num">{U.money(l.amount)}</div>
               </div>
             ))}
           </div>
         ) : (
-          <p className="rv-muted rv-small">Schedule C {c.line}번 · {c.en}</p>
+          <p className="rv-muted rv-small">{catLine(c)}</p>
         )}
 
         {Math.abs(U.deductible(rec) - Number(rec.total || 0)) > 0.005 && (
           <p className="rv-small">
-            {rec.business_pct < 100 ? '사업 사용 ' + rec.business_pct + '% · ' : ''}
-            공제 반영 {U.money(U.deductible(rec))}
+            {P.form.businessPct && rec.business_pct < 100
+              ? '사업 사용 ' + rec.business_pct + '% · ' : ''}
+            {P.counted.ko} {U.money(U.deductible(rec))}
           </p>
         )}
 
@@ -1255,13 +1477,13 @@ function Detail({ rec, members, canWrite, onEdit, onDeleted, onBack }) {
             <><L k="enteredBy" /> {enteredBy ? U.shortName(enteredBy.email) : '—'} · </>
           )}
           <L k="uploadedAt" /> {rec.created_at ? String(rec.created_at).slice(0, 16).replace('T', ' ') : '—'}
+          {rec.payment_ref && <> · {rec.payment_ref}</>}
         </p>
 
         {rec.notes
           ? <p className="rv-note">{rec.notes}</p>
           : <Banner kind="warn">
-              사업 목적이 비어 있어. 세무사 자료에 "무슨 지출인지"가 안 나가.
-              수정에서 한 줄만 적어줘.
+              {P.form.purposeMissing}
             </Banner>}
         {url && <div className="rv-preview"><img src={url} alt="영수증" /></div>}
 
@@ -1283,7 +1505,10 @@ function Detail({ rec, members, canWrite, onEdit, onDeleted, onBack }) {
 // 설정 — 장부, 식구, 세무사 자료에 찍힐 이름
 // =================================================================
 
-function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onReload }) {
+function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onNewLedger, onReload }) {
+  const KIND = window.RV_KIND(ledger.kind);
+  const SET = window.RV_CAT_SETS[
+    KIND.catSets.indexOf(ledger.cat_set) >= 0 ? ledger.cat_set : KIND.catSets[0]];
   const [invites, setInvites] = useState([]);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('editor');
@@ -1297,6 +1522,7 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
 
   const [quota, setQuota] = useState(null);
   const [diag, setDiag] = useState(null);
+  const [diagOpen, setDiagOpen] = useState(false);   // 접어 둔 상태로 시작
   const [refreshing, setRefreshing] = useState(false);
 
   async function doHardRefresh() {
@@ -1337,40 +1563,64 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
 
   return (
     <div className="rv-screen">
-      <div className="rv-topbar"><span /><strong>설정</strong><span /></div>
+      <div className="rv-topbar">
+        <span />
+        <strong>설정</strong>
+        {/* 강제 갱신. 큰 버튼 대신 아이콘 하나로 — 자주 쓰지만 자리를 차지할 일은 아니다. */}
+        <button className={'rv-icon-btn' + (refreshing ? ' rv-spin' : '')}
+                onClick={doHardRefresh} disabled={refreshing}
+                title="강제 갱신 (캐시를 지우고 최신 파일을 새로 받아)"
+                aria-label="Force Refresh 강제 갱신">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none"
+               stroke="currentColor" strokeWidth="2"
+               strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+            <polyline points="20 4 20 11 13 11" />
+          </svg>
+        </button>
+      </div>
       <div className="rv-body">
         {msg && <Banner kind="info" onClose={() => setMsg('')}>{msg}</Banner>}
         {err && <Banner kind="error" onClose={() => setErr('')}>{err}</Banner>}
 
         {ledgers.length > 1 && (
-          <label className="rv-label">보고 있는 장부
+          <label className="rv-label"><L k="switchLedger" />
             <select className="rv-input" value={ledger.id}
                     onChange={(e) => onSwitch(e.target.value)}>
-              {ledgers.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {ledgers.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name} — {window.RV_KIND(l.kind).ko}
+                </option>
+              ))}
             </select>
           </label>
         )}
 
         {/* ---- 장부 정보 ---- */}
         <h3 className="rv-h3">장부</h3>
+        <div className="rv-kindtag">
+          {KIND.en} <span className="rv-kind-ko">{KIND.ko}</span>
+          {KIND.catSets.length > 1 && <span className="rv-kind-ko"> · {SET.ko}</span>}
+        </div>
+        <p className="rv-muted rv-small">{KIND.desc}</p>
         {isOwner ? (
           <>
             <label className="rv-label">장부 이름
               <input className="rv-input" value={fields.name}
                      onChange={(e) => setFields({ ...fields, name: e.target.value })} />
             </label>
-            <label className="rv-label">사업체명 (세무사 자료 머리말)
-              <input className="rv-input" placeholder="Maedeup Leather Studio"
+            <label className="rv-label">{KIND.entity.nameLabel}
+              <input className="rv-input" placeholder={KIND.entity.namePlaceholder}
                      value={fields.business_name}
                      onChange={(e) => setFields({ ...fields, business_name: e.target.value })} />
             </label>
-            <label className="rv-label">납세자명
+            <label className="rv-label">{KIND.entity.ownerLabel}
               <input className="rv-input" placeholder="Jenny Ryu"
                      value={fields.taxpayer_name}
                      onChange={(e) => setFields({ ...fields, taxpayer_name: e.target.value })} />
             </label>
             <p className="rv-muted rv-small">
-              이 둘은 세무사에게 보내는 PDF 맨 위에 찍혀. 비워두면 장부 이름이 대신 나와.
+              이 둘은 {KIND.doc.screenTitle} PDF 맨 위에 찍혀. 비워두면 장부 이름이 대신 나와.
             </p>
             <button className="rv-btn" onClick={saveFields}>장부 정보 저장</button>
           </>
@@ -1379,6 +1629,15 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
             {ledger.name} · 장부 정보는 주인만 고칠 수 있어.
           </p>
         )}
+
+        <button className="rv-btn-ghost rv-wide" onClick={onNewLedger}>
+          + 장부 하나 더 만들기
+        </button>
+        <p className="rv-muted rv-small">
+          성격이 다른 지출은 장부를 나누는 게 좋아 — 공방 경비와 집 리모델링은 세금 계산이
+          아예 달라서 한 장부에 섞이면 둘 다 못 쓰게 돼. 장부끼리는 자료도 보고서도 분리돼 있고,
+          같이 쓰는 사람도 장부마다 따로 정해.
+        </p>
 
         {/* ---- 식구 ---- */}
         <h3 className="rv-h3">같이 쓰는 사람</h3>
@@ -1464,32 +1723,40 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
           자동 인식을 끄면 사진은 이 앱 밖으로 나가지 않아.
         </p>
 
-        {/* ---- 점검 ---- */}
+        {/* ---- 점검 ----
+             버튼은 맨 위 오른쪽 아이콘으로 옮겼다. 설명만 여기 남긴다 —
+             아이콘만 있으면 눌러도 되는 건지 알 수가 없어서. */}
         <h3 className="rv-h3"><L k="maintenance" /></h3>
-        <button className="rv-btn-ghost rv-wide" onClick={doHardRefresh} disabled={refreshing}>
-          {refreshing ? '비우는 중...' : <><L k="hardRefresh" /></>}
-        </button>
         <p className="rv-muted rv-small">
+          화면 오른쪽 위 <strong>⟳</strong> 가 <strong>강제 갱신</strong>이야.
           저장된 캐시와 서비스워커를 지우고 최신 파일을 새로 받아. 코드를 고쳤는데 화면이
           그대로일 때 누르면 돼. 영수증 자료는 서버에 있으니 지워지지 않아.
         </p>
 
-        {/* ---- 연결 상태 (개발 중에만) ---- */}
+        {/* ---- 연결 상태 (개발 중에만, 접어 둔다) ---- */}
         {window.RV_APP.isDev() && diag && (
           <>
-            <h3 className="rv-h3"><L k="diagnostics" /></h3>
-            <div className="rv-diag">
-              {diag.map((d) => (
-                <div key={d.k} className={'rv-diag-row' + (d.bad ? ' rv-diag-bad' : '')}>
-                  <span className="rv-diag-k">{d.k}</span>
-                  <span className="rv-diag-v">{d.v}</span>
+            <button className="rv-fold" onClick={() => setDiagOpen(!diagOpen)}
+                    aria-expanded={diagOpen}>
+              <span className="rv-fold-t"><L k="diagnostics" /></span>
+              <span className={'rv-fold-c' + (diagOpen ? ' rv-fold-open' : '')}>▾</span>
+            </button>
+            {diagOpen && (
+              <>
+                <div className="rv-diag">
+                  {diag.map((d) => (
+                    <div key={d.k} className={'rv-diag-row' + (d.bad ? ' rv-diag-bad' : '')}>
+                      <span className="rv-diag-k">{d.k}</span>
+                      <span className="rv-diag-v">{d.v}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <p className="rv-muted rv-small">
-              <strong>Files updated</strong> 는 지금 열려 있는 코드가 언제 서버에 올라간 건지야.
-              파일을 올린 뒤 이 시각이 안 바뀌면 아직 반영이 안 된 거야.
-            </p>
+                <p className="rv-muted rv-small">
+                  <strong>Files updated</strong> 는 지금 열려 있는 코드가 언제 서버에 올라간 건지야.
+                  파일을 올린 뒤 이 시각이 안 바뀌면 아직 반영이 안 된 거야.
+                </p>
+              </>
+            )}
           </>
         )}
 
@@ -1590,6 +1857,17 @@ function App() {
   useEffect(() => { load(); }, [load]);
 
   const ledger = ledgers.find((l) => l.id === ledgerId) || null;
+
+  // 예전에 쓴 카드 표기 목록. 입력할 때 골라 쓸 수 있게.
+  // 따로 저장하는 표를 두지 않는다 — 이미 넣은 영수증이 곧 목록이다.
+  const paymentRefs = useMemo(() => {
+    const seen = [];
+    rows.forEach((r) => {
+      const v = (r.payment_ref || '').trim();
+      if (v && seen.indexOf(v) === -1) seen.push(v);
+    });
+    return seen.sort();
+  }, [rows]);
   const myRole = (members.find((m) => m.user_id === (session && session.user.id)) || {}).role;
   const canWrite = myRole === 'owner' || myRole === 'editor';
   const isOwner = myRole === 'owner';
@@ -1612,15 +1890,26 @@ function App() {
   if (session === null) return <SignIn />;
   if (booting) return <div className="rv-center"><Spinner label="장부 여는 중..." /></div>;
 
-  if (!ledger) {
-    return <StartLedger session={session} onMade={() => boot()} />;
+  if (!ledger || mode === 'newledger') {
+    return (
+      <StartLedger
+        session={session}
+        onMade={(made) => {
+          if (made) { DB.rememberLedger(made.id); setLedgerId(made.id); }
+          setMode(null);
+          boot();
+        }}
+        onCancel={ledger ? () => setMode(null) : null}
+      />
+    );
   }
 
   if (mode === 'add' || mode === 'edit') {
     return (
       <ReceiptForm
         initial={mode === 'edit' ? current : null}
-        ledgerId={ledgerId}
+        ledger={ledger}
+        paymentRefs={paymentRefs}
         session={session}
         onDone={() => { setMode(null); setCurrent(null); load(); }}
         onCancel={() => setMode(mode === 'edit' ? 'detail' : null)}
@@ -1632,6 +1921,7 @@ function App() {
     return (
       <Detail
         rec={current}
+        ledger={ledger}
         members={members}
         canWrite={canWrite}
         onEdit={() => setMode('edit')}
@@ -1665,7 +1955,7 @@ function App() {
       )}
 
       {tab === 'report' && (
-        <Report rows={rows} year={year} onTaxDoc={() => setMode('tax')} />
+        <Report rows={rows} year={year} ledger={ledger} onTaxDoc={() => setMode('tax')} />
       )}
 
       {tab === 'settings' && (
@@ -1673,6 +1963,7 @@ function App() {
           session={session} ledger={ledger} ledgers={ledgers} members={members}
           isOwner={isOwner}
           onSwitch={(id) => { DB.rememberLedger(id); setLedgerId(id); }}
+          onNewLedger={() => setMode('newledger')}
           onReload={boot}
         />
       )}

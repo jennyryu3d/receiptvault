@@ -44,13 +44,35 @@ function json(body, status, origin) {
   });
 }
 
-function buildPrompt(categories, countries, today) {
+// 장부 종류마다 읽는 눈이 달라야 한다. 리모델링 영수증을 "사업 경비" 로 읽으면
+// 분류도 목적문도 엉뚱해진다. 클라이언트가 문장을 넘기지는 못하게 하고,
+// 여기 있는 두 가지 중에서만 고른다.
+const SETTINGS = {
+  business: {
+    intro: 'You are reading a purchase receipt for a small leather-craft studio based in California.',
+    purpose: 'in English, what was bought and why it is a business expense',
+    purposeHelp: 'Name the actual items and, when you can tell, why they serve the business — '
+      + 'e.g. "waxed thread and leather dye for bag production", "storage bins for parts".',
+  },
+  property: {
+    intro: 'You are reading a purchase or contractor receipt for the remodeling of a private home '
+      + 'in California. The owner is recording costs that may be added to the home\'s cost basis, '
+      + 'so the category must reflect what part of the house the money went to.',
+    purpose: 'in English, what was bought or done, and which part of the house it was for',
+    purposeHelp: 'Name the actual items or work and the room or system — e.g. '
+      + '"quartz countertop for kitchen remodel", "rough-in plumbing, upstairs bathroom". '
+      + 'If the receipt is a contractor invoice covering several trades, say so.',
+  },
+};
+
+function buildPrompt(categories, countries, today, kind) {
   const list = (categories || [])
     .map((c) => '- ' + c.key + ': ' + c.label + (c.hint ? ' (' + c.hint + ')' : ''))
     .join('\n');
+  const S = SETTINGS[kind === 'property' ? 'property' : 'business'];
 
   return [
-    'You are reading a purchase receipt for a small leather-craft studio based in California.',
+    S.intro,
     'The image is either a photo of a paper receipt or a screenshot of an online order.',
     'The receipt may be in any language and any currency.',
     '',
@@ -63,8 +85,9 @@ function buildPrompt(categories, countries, today) {
     '  "currency": "three-letter code of the currency printed on the receipt",',
     '  "amount": 0.00,',
     '  "tax": 0.00,',
-    '  "notes_en": "in English, what was bought and why it is a business expense",',
+    '  "notes_en": "' + S.purpose + '",',
     '  "payment_method": "card|cash|transfer|other",',
+    '  "payment_ref": "short label of the card or account used, or null",',
     '  "category": "one key from the list below",',
     '  "splits": null,',
     '  "confidence": 0.0',
@@ -87,10 +110,8 @@ function buildPrompt(categories, countries, today) {
     '- "merchant" keeps the name as printed (Korean stays Korean).',
     '- "merchant_en" is the English form: use the business\'s own English name if it has one,',
     '  otherwise romanize it (한국마켓 → "Hankook Market", 롯데마트 → "Lotte Mart").',
-    '- "notes_en" is the most important field for an audit. Name the actual items and, when',
-    '  you can tell, why they serve the business — e.g. "waxed thread and leather dye for',
-    '  bag production", "storage bins for parts". Plain English, under 15 words.',
-    '  Leave null only if the line items are unreadable.',
+    '- "notes_en" is the most important field for an audit. ' + S.purposeHelp,
+    '  Plain English, under 15 words. Leave null only if the line items are unreadable.',
     '- If the receipt is already in English, set merchant_en to the same value as merchant.',
     '',
     'Rules:',
@@ -105,6 +126,10 @@ function buildPrompt(categories, countries, today) {
     '  distribute tax and shipping in proportion, putting any leftover on the largest part.',
     '  Use at most 4 parts. If you cannot read reliable per-item amounts, return null.',
     '- "category" is always filled in: the single category, or the largest part when split.',
+    '- "payment_ref" identifies which card or account paid, so it can be matched against a',
+    '  statement later. Receipts usually print the brand and the last four digits — return',
+    '  them as e.g. "Visa ...4821", "Amex ...1007", "Cash". NEVER return a full card number:',
+    '  if more than four digits are visible, keep only the last four. Null if not shown.',
     '- Never invent a value. Use null when the receipt does not show it.',
     '- Output raw JSON only. No markdown fences, no commentary.',
   ].join('\n');
@@ -198,7 +223,8 @@ export default {
           role: 'user',
           content: [
             { type: 'image', source: { type: 'base64', media_type: mediaType, data: image } },
-            { type: 'text', text: buildPrompt(body.categories, body.countries, body.today) },
+            { type: 'text', text: buildPrompt(body.categories, body.countries, body.today,
+                                              body.kind) },
           ],
         }],
       }),

@@ -105,6 +105,10 @@
            border:1px solid var(--line)}
   .rv-pill-cogs{background:#22301f;border-color:#3b5535;color:#b9d6ac}
   .rv-pill-expense{background:#2a2620;border-color:#463d31;color:#d9c6a6}
+  /* 합계에 잡히는 것 / 안 잡히는 것 — 목록에서 한눈에 갈리게 */
+  .rv-pill-basis{background:#22301f;border-color:#3b5535;color:#b9d6ac}
+  .rv-pill-nonbasis{background:#2b2523;border-color:#4a3b36;color:#c9b4ad}
+  .rv-pill-personal{background:#232a30;border-color:#3a4653;color:#b7c6d6}
 
   /* ---------- 영문/한글 병기 라벨 ---------- */
   /* 영문이 본문, 한글은 옆에 작게. 세무사와 화면을 같이 봐도 말이 통하게. */
@@ -132,6 +136,33 @@
                 border:1px solid var(--line);overflow:hidden;margin:8px 0}
   .rv-quota-fill{height:100%;background:var(--tan);border-radius:99px;
                  transition:width .3s}
+
+  /* ---------- 장부 종류 고르기 ---------- */
+  .rv-kinds{display:flex;flex-direction:column;gap:10px;margin:16px 0 4px}
+  .rv-scope{font-size:11px;color:var(--muted);letter-spacing:.4px;text-transform:uppercase}
+  .rv-kind{text-align:left;background:var(--panel2);border:1px solid var(--line);
+           border-radius:12px;padding:13px 15px}
+  .rv-kind-on{border-color:var(--tan);background:rgba(198,160,106,.10)}
+  .rv-kind-t{font-size:15px;font-weight:700;color:var(--tan);margin-bottom:3px}
+  .rv-kind-ko{font-size:12px;font-weight:400;color:var(--muted);margin-left:5px}
+  .rv-kindtag{margin-top:10px;display:inline-block;padding:4px 11px;border-radius:20px;
+              border:1px solid var(--tan-dim);color:var(--tan);font-size:13px}
+
+  /* ---------- 맨 위 아이콘 버튼 (강제 갱신) ---------- */
+  .rv-icon-btn{background:transparent;border:none;padding:4px;line-height:0;
+               color:var(--tan);border-radius:10px}
+  .rv-icon-btn:active{background:var(--panel2)}
+  .rv-icon-btn:disabled{opacity:.6}
+  .rv-spin svg{animation:rv-turn .8s linear infinite}
+  @keyframes rv-turn{to{transform:rotate(360deg)}}
+
+  /* ---------- 접었다 펴는 칸 ---------- */
+  .rv-fold{display:flex;width:100%;align-items:center;justify-content:space-between;
+           gap:10px;background:transparent;border:none;border-bottom:1px solid var(--line);
+           margin:28px 0 4px;padding:0 0 7px;text-align:left}
+  .rv-fold-t{font-size:14px;font-weight:700;color:var(--tan)}
+  .rv-fold-c{color:var(--muted);font-size:12px;transition:transform .15s}
+  .rv-fold-open{transform:rotate(180deg)}
 
   /* ---------- 연결 상태 · 앱 정보 ---------- */
   .rv-diag{margin-top:10px;border:1px solid var(--line);border-radius:11px;overflow:hidden}
@@ -211,7 +242,10 @@
   /* ---------- 상세 / 리포트 ---------- */
   .rv-detail-amt{font-size:34px;font-weight:700;letter-spacing:-1px;margin-bottom:6px}
   .rv-deduct{margin-top:18px;padding:13px;border-radius:11px;background:var(--panel2);
-             display:flex;justify-content:space-between;font-size:14px}
+             display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+             flex-wrap:wrap;font-size:14px}
+  .rv-deduct-k{font-weight:600}
+  .rv-deduct-ko{color:var(--muted);font-size:12px}
   .rv-confirm{margin-top:22px;padding:16px;border-radius:12px;
               background:#2e1a18;border:1px solid #5c2f2a}
   .rv-report-sec{margin-bottom:30px}

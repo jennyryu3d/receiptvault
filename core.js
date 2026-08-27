@@ -128,6 +128,21 @@
       return { rate: rate, date: data.date || dateStr, source: 'ecb' };
     },
 
+    // 결제 수단 표기 정리. 'Visa ...4821' 정도만 남긴다.
+    //
+    // AI에게 끝 4자리만 달라고 시켜두긴 했지만, 모델이 실수로 전체 번호를 뱉을 수도 있다.
+    // 카드번호가 통째로 데이터베이스에 들어가는 건 어떤 이유로도 안 되니까
+    // 저장되기 전에 여기서 한 번 더 자른다. 5자리 이상 이어진 숫자는 끝 4자리만 남긴다.
+    cleanPaymentRef: function (v) {
+      if (!v) return '';
+      var s = String(v).replace(/[•*·]+/g, '.').trim();
+      s = s.replace(/\d[\d\s-]{4,}/g, function (run) {
+        var digits = run.replace(/\D/g, '');
+        return '...' + digits.slice(-4);
+      });
+      return s.replace(/\s+/g, ' ').slice(0, 40);
+    },
+
     deductible: function (r) {
       return RV_UTIL.lines(r).reduce(function (s, l) { return s + l.deductible; }, 0);
     },
@@ -175,9 +190,23 @@
         if (na !== nb) return na - nb;
         return a.cat.line.localeCompare(b.cat.line);
       };
+      var byOrd = function (a, b) { return (a.cat.ord || 0) - (b.cat.ord || 0); };
+
+      // group 이름을 미리 정해두지 않는다. 분류표가 쓰는 group 이 곧 칸 이름이다.
+      // 새 장부 종류가 새 group 을 쓰더라도 여기는 고칠 필요가 없다.
+      var groups = {};
+      all.forEach(function (e) {
+        var g = e.cat.group || 'other';
+        (groups[g] = groups[g] || []).push(e);
+      });
+      Object.keys(groups).forEach(function (g) {
+        // 신고서 줄번호가 있는 표는 줄번호 순, 없으면 정해둔 순서대로
+        groups[g].sort(groups[g][0].cat.line ? byLine : byOrd);
+      });
+
       return {
-        cogs: all.filter(function (e) { return e.cat.group === 'cogs'; }).sort(byLine),
-        expense: all.filter(function (e) { return e.cat.group === 'expense'; }).sort(byLine),
+        group: function (name) { return groups[name] || []; },
+        groups: groups,
         byAmount: all.slice().sort(function (a, b) { return b.deduct - a.deduct; }),
       };
     },
@@ -331,10 +360,19 @@
       return res.data || [];
     },
 
-    createLedger: async function (session, name) {
+    createLedger: async function (session, name, kind, catSet) {
       var c = need();
+      // 종류와 분류표가 실제로 있는 값인지 여기서 한 번 거른다.
+      // 없는 값이면 기본값으로 떨어지게 — 화면이 통째로 못 그려지는 것보다 낫다.
+      var prof = window.RV_KIND(kind);
+      var set = prof.catSets.indexOf(catSet) >= 0 ? catSet : prof.catSets[0];
       var made = await c.from('ledgers')
-        .insert({ name: name || '우리 공방', owner_id: session.user.id })
+        .insert({
+          name: name || prof.defaultName,
+          kind: prof.key,
+          cat_set: set,
+          owner_id: session.user.id,
+        })
         .select().single();
       if (made.error) throw made.error;
 
@@ -549,7 +587,7 @@
     // 로그인한 사람만 인식을 부를 수 있다. 토큰을 같이 보내면 Worker 가
     // 그 토큰으로 사용량 한도를 확인하고 기록한다. 주소만 알아낸 외부인은
     // 토큰이 없어서 아무것도 못 한다 — API 요금이 새지 않게 하는 핵심 장치다.
-    extract: async function (blob, ledgerId) {
+    extract: async function (blob, ledgerId, ledger) {
       if (!CFG.AI_PROXY_URL) throw new Error('AI 인식이 아직 연결되지 않았어요.');
 
       var session = await window.RV_DB.getSession();
@@ -568,7 +606,10 @@
           image: base64,
           media_type: 'image/jpeg',
           ledger_id: ledgerId || null,
-          categories: window.RV_CATEGORIES.map(function (c) {
+          // 장부에 따라 분류표도, 워커가 쓰는 설명문도 달라진다.
+          // 워커에는 프로필이 정해둔 값(ai)만 넘어간다 — 임의 문장을 넘기지 않는다.
+          kind: window.RV_KIND(ledger && ledger.kind).ai,
+          categories: window.RV_CATS(ledger).map(function (c) {
             return { key: c.key, label: c.en, hint: c.hint || '' };
           }),
           countries: (window.RV_COUNTRIES || []).map(function (c) {

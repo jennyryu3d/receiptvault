@@ -79,6 +79,16 @@ window.RV_T = {
   dataPrivacy:   { en: 'Data & Privacy', ko: '데이터와 개인정보' },
   account:       { en: 'Account',        ko: '계정' },
 
+  // --- 장부 종류 ---
+  ledgerKind:    { en: 'Ledger Type',   ko: '장부 종류' },
+  kindBusiness:  { en: 'Business',      ko: '사업' },
+  kindProperty:  { en: 'Property',      ko: '부동산 개량' },
+  addedToBasis:  { en: 'Added to Basis',ko: '취득원가 반영' },
+  costBasis:     { en: 'Cost Basis Record', ko: '취득원가 기록' },
+  paymentRef:    { en: 'Card / Account',ko: '어느 카드 · 계좌' },
+  workDone:      { en: 'Work / Purpose',ko: '무슨 공사 · 용도' },
+  switchLedger:  { en: 'Ledger in view',ko: '보고 있는 장부' },
+
   // --- 양쪽에서 그대로 쓰는 말 (영문만) ---
   email:         { en: 'Email' },
   aiUsage:       { en: 'AI Usage' },
