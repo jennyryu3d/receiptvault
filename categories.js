@@ -200,6 +200,8 @@ window.RV_PROFILES = {
   business: {
     key: 'business', en: 'Business', ko: '사업', taxScope: 'filing',
     desc: '공방·판매처럼 그 해에 경비로 공제받는 장부. Schedule C 로 정리돼.',
+    // 장부마다 앱 색이 바뀐다. 지금 어느 장부에 있는지 글자를 읽지 않아도 알게.
+    accent: '#c8a26a', accentDim: '#8a6f45', icon: '✂',   // 가죽 톤
     defaultName: '우리 공방',
     catSets: ['leather'],               // 업종이 늘면 여기에 이름을 더한다
     ai: 'business',                     // Worker 가 쓰는 설명문 종류
@@ -255,6 +257,7 @@ window.RV_PROFILES = {
   property: {
     key: 'property', en: 'Property Improvement', ko: '부동산 개량', taxScope: 'future',
     desc: '집 리모델링처럼 그 해에 공제되지 않고 집의 취득원가에 쌓이는 장부. 집을 팔 때 쓰여.',
+    accent: '#7fa8c9', accentDim: '#4d6c86', icon: '⌂',   // 집 톤 (푸른색)
     defaultName: '집 리모델링',
     catSets: ['remodel'],
     ai: 'property',

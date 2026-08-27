@@ -643,6 +643,11 @@
   // RV_APP — 앱 자체에 대한 것 (버전 확인, 강제 갱신, 진단)
   // =============================================================
   var RV_APP = {
+    // 이 앱을 이루는 파일들. 강제 갱신이 이걸 하나씩 새로 받아
+    // 브라우저 캐시를 갈아끼운다. 파일을 추가하면 여기에도 넣을 것.
+    FILES: ['index.html', 'config.js', 'labels.js', 'categories.js',
+            'core.js', 'app.jsx', 'sw.js', 'manifest.webmanifest'],
+
     version: function () {
       return (CFG.APP_VERSION || '0.0.0');
     },
@@ -687,7 +692,21 @@
           await Promise.all(keys.map(function (k) { return caches.delete(k); }));
         }
       } catch (e) {}
-      // 주소에 시각을 붙여 브라우저 캐시까지 확실히 우회한다
+
+      // 여기가 핵심이다.
+      // 서비스워커와 캐시 스토리지를 지워도 **브라우저 자체 HTTP 캐시**는 그대로 남는다.
+      // GitHub Pages 는 파일을 10분간 캐시하라고 내려보내므로, 그 사이에는
+      // 새로고침을 해도 옛날 app.jsx 가 그대로 나온다. 실제로 이 일이 있었다.
+      // 주소에 ?fresh= 를 붙이는 건 HTML 한 장만 새로 받게 할 뿐, 스크립트에는 소용없다.
+      //
+      // cache:'reload' 로 한 번씩 받아오면 브라우저 캐시의 그 항목이 새 것으로 갈린다.
+      // 그다음 새로고침하면 방금 갱신된 것을 쓴다.
+      try {
+        await Promise.all(RV_APP.FILES.map(function (f) {
+          return fetch(f, { cache: 'reload' }).catch(function () {});
+        }));
+      } catch (e) {}
+
       var q = '?fresh=' + Date.now() + (tab ? '&tab=' + encodeURIComponent(tab) : '');
       window.location.replace(window.location.pathname + q);
     },

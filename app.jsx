@@ -148,17 +148,22 @@ function SignIn() {
 //   넣어버린다. 그건 나중에 세무사 자료가 틀리는 사고다.
 //   그리고 장부를 오가는 건 설정이 아니라 일상 동작이다.
 
-function LedgerBar({ ledger, ledgers, onOpen }) {
+function LedgerBar({ ledger, ledgers, stamp, onOpen }) {
   const K = window.RV_KIND(ledger.kind);
   return (
     <button className="rv-ledgerbar" onClick={onOpen}>
-      <span className="rv-ledgerbar-dot" data-scope={K.taxScope} />
-      <span className="rv-ledgerbar-name">{ledger.name}</span>
-      <span className="rv-ledgerbar-kind">{K.ko}</span>
-      <span className="rv-ledgerbar-caret">▾</span>
-      {ledgers.length > 1 && (
-        <span className="rv-ledgerbar-n">{ledgers.length}</span>
-      )}
+      <span className="rv-ledgerbar-icon">{K.icon}</span>
+      <span className="rv-ledgerbar-mid">
+        <span className="rv-ledgerbar-name">{ledger.name}</span>
+        <span className="rv-ledgerbar-kind">{K.en} · {K.ko}</span>
+      </span>
+      <span className="rv-ledgerbar-right">
+        <span className="rv-ledgerbar-swap">
+          {ledgers.length > 1 ? '장부 바꾸기 ▾' : '장부 ▾'}
+        </span>
+        {/* 개발 중에는 버전과 파일 시각을 늘 보이게 — 갱신됐는지 여기서 바로 안다 */}
+        {stamp && <span className="rv-ledgerbar-ver">{stamp}</span>}
+      </span>
     </button>
   );
 }
@@ -188,8 +193,9 @@ function LedgerSheet({ ledger, ledgers, onPick, onNew, onClose }) {
               return (
                 <button key={l.id}
                         className={'rv-sheet-item' + (on ? ' rv-sheet-on' : '')}
+                        style={{ borderColor: on ? K.accent : undefined }}
                         onClick={() => { onPick(l.id); onClose(); }}>
-                  <span className="rv-ledgerbar-dot" data-scope={K.taxScope} />
+                  <span className="rv-sheet-icon" style={{ color: K.accent }}>{K.icon}</span>
                   <span className="rv-sheet-name">
                     {l.name}
                     <span className="rv-sheet-kind">{K.en} · {K.ko}</span>
@@ -623,8 +629,9 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
 
       {/* 어느 장부에 저장되는지. 장부를 잘못 고른 채 한참 입력하는 걸 막는다. */}
       <div className="rv-inledger">
-        <span className="rv-ledgerbar-dot" data-scope={P.taxScope} />
-        {ledger.name}에 저장돼
+        <span className="rv-inledger-icon">{P.icon}</span>
+        {/* flex 안에서는 글자 조각마다 간격이 벌어진다. 한 덩어리로 묶어둔다 */}
+        <span><strong>{ledger.name}</strong>에 저장돼 · {P.ko}</span>
       </div>
 
       {/* 화면 아래에 붙는 알림.
@@ -1929,6 +1936,31 @@ function App() {
 
   const ledger = ledgers.find((l) => l.id === ledgerId) || null;
 
+  // 개발 중 표시: 버전 + 지금 돌아가는 파일이 언제 올라간 것인지.
+  // 버전을 손으로 안 올려도 파일 시각은 저절로 바뀌므로 "갱신됐나"를 이걸로 안다.
+  const [stamp, setStamp] = useState('');
+  useEffect(() => {
+    if (!window.RV_APP.isDev()) return;
+    let alive = true;
+    window.RV_APP.lastDeployed().then((d) => {
+      if (!alive) return;
+      const t = d ? (d.getMonth() + 1) + '/' + d.getDate() + ' ' +
+                    String(d.getHours()).padStart(2, '0') + ':' +
+                    String(d.getMinutes()).padStart(2, '0') : '';
+      setStamp('v' + window.RV_APP.version() + (t ? ' · ' + t : ''));
+    });
+    return () => { alive = false; };
+  }, []);
+
+  // 장부마다 앱 색이 바뀐다. 강조색 두 개만 갈아끼우면 화면 전체가 따라온다.
+  const K = ledger ? window.RV_KIND(ledger.kind) : null;
+  const skin = (node) => (
+    <div className="rv-root"
+         style={K ? { '--tan': K.accent, '--tan-dim': K.accentDim } : undefined}>
+      {node}
+    </div>
+  );
+
   // 예전에 쓴 카드 표기 목록. 입력할 때 골라 쓸 수 있게.
   // 따로 저장하는 표를 두지 않는다 — 이미 넣은 영수증이 곧 목록이다.
   const paymentRefs = useMemo(() => {
@@ -1976,7 +2008,7 @@ function App() {
   }
 
   if (mode === 'add' || mode === 'edit') {
-    return (
+    return skin(
       <ReceiptForm
         initial={mode === 'edit' ? current : null}
         ledger={ledger}
@@ -1989,7 +2021,7 @@ function App() {
   }
 
   if (mode === 'detail' && current) {
-    return (
+    return skin(
       <Detail
         rec={current}
         ledger={ledger}
@@ -2006,16 +2038,17 @@ function App() {
   }
 
   if (mode === 'tax') {
-    return (
+    return skin(
       <TaxDoc rows={rows} year={year} ledger={ledger} members={members}
               onBack={() => setMode(null)} />
     );
   }
 
-  return (
+  return skin(
     <div className="rv-app">
       {/* 어느 장부를 보고 있는지 — 늘 맨 위에 */}
-      <LedgerBar ledger={ledger} ledgers={ledgers} onOpen={() => setSheet(true)} />
+      <LedgerBar ledger={ledger} ledgers={ledgers} stamp={stamp}
+                 onOpen={() => setSheet(true)} />
 
       {sheet && (
         <LedgerSheet

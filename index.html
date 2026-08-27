@@ -138,23 +138,43 @@
                  transition:width .3s}
 
   /* ---------- 맨 위 장부 막대 ---------- */
-  .rv-ledgerbar{display:flex;align-items:center;gap:8px;width:100%;
-                padding:10px 16px;background:var(--panel2);
-                border:none;border-bottom:1px solid var(--line);text-align:left}
-  .rv-ledgerbar-name{font-size:15px;font-weight:700;color:var(--ink);
+  /* 장부마다 강조색(--tan)이 갈리므로 이 막대의 색도 저절로 따라간다.
+     글자를 읽기 전에 색으로 먼저 "지금 어느 장부인지" 알게 하는 게 목적이다. */
+  .rv-root{height:100%}
+  .rv-ledgerbar{display:flex;align-items:center;gap:11px;width:100%;
+                padding:11px 16px;text-align:left;border:none;
+                background:var(--panel2);   /* color-mix 를 모르는 브라우저용 */
+                background:linear-gradient(180deg,
+                  color-mix(in srgb, var(--tan) 16%, var(--panel)) 0%,
+                  var(--panel) 100%);
+                border-bottom:2px solid var(--tan)}
+  .rv-ledgerbar-icon{width:32px;height:32px;flex-shrink:0;border-radius:9px;
+                     display:flex;align-items:center;justify-content:center;
+                     font-size:17px;color:#20180c;background:var(--tan)}
+  .rv-ledgerbar-mid{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+  .rv-ledgerbar-name{font-size:17px;font-weight:700;color:var(--ink);letter-spacing:-.2px;
                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .rv-ledgerbar-kind{font-size:11px;color:var(--muted);white-space:nowrap}
-  .rv-ledgerbar-caret{color:var(--tan);font-size:12px}
-  .rv-ledgerbar-n{margin-left:auto;font-size:11px;color:var(--muted);
-                  border:1px solid var(--line);border-radius:20px;padding:1px 8px}
-  /* 세금 성격을 점 색으로. 신고에 들어가는 장부인지 한눈에. */
-  .rv-ledgerbar-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--muted)}
-  .rv-ledgerbar-dot[data-scope="filing"]{background:var(--tan)}
-  .rv-ledgerbar-dot[data-scope="future"]{background:var(--green)}
+  .rv-ledgerbar-kind{font-size:11px;color:var(--tan);white-space:nowrap;
+                     overflow:hidden;text-overflow:ellipsis}
+  .rv-ledgerbar-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+                      flex-shrink:0}
+  .rv-ledgerbar-swap{font-size:11px;color:var(--tan);border:1px solid var(--tan-dim);
+                     border-radius:20px;padding:3px 9px;white-space:nowrap}
+  .rv-ledgerbar-ver{font-size:9.5px;color:var(--muted);
+                    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 
-  .rv-inledger{display:flex;align-items:center;gap:7px;
-               padding:8px 16px;font-size:12px;color:var(--muted);
-               background:var(--panel2);border-bottom:1px solid var(--line)}
+  .rv-inledger{display:flex;align-items:center;gap:8px;
+               padding:9px 16px;font-size:12px;color:var(--muted);
+               background:var(--panel2);   /* fallback */
+               background:color-mix(in srgb, var(--tan) 12%, var(--panel2));
+               border-bottom:1px solid var(--tan-dim)}
+  .rv-inledger strong{color:var(--ink)}
+  .rv-inledger-icon{width:20px;height:20px;border-radius:6px;flex-shrink:0;
+                    display:flex;align-items:center;justify-content:center;
+                    font-size:12px;color:#20180c;background:var(--tan)}
+  .rv-sheet-icon{width:30px;height:30px;border-radius:9px;flex-shrink:0;
+                 display:flex;align-items:center;justify-content:center;font-size:16px;
+                 border:1px solid currentColor}
 
   /* ---------- 아래에서 올라오는 판 ---------- */
   .rv-sheet-back{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55);
