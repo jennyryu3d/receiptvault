@@ -5,6 +5,11 @@
 // 진짜 비밀인 Anthropic API 키는 이 파일에 절대 넣지 않는다 — Cloudflare Worker 안에만 있다.
 
 window.RV_CONFIG = {
+  APP_NAME: 'ReceiptVault',
+  APP_VERSION: '0.4.0',
+  DEVELOPER: 'Jenny Ryu',
+  COPYRIGHT_YEAR: 2026,
+  STAGE: 'dev',
   // Supabase → Project Settings → Data API 에서 복사
   SUPABASE_URL: 'https://qkeocwypitffhrklodxl.supabase.co',       // 예: https://abcdefghijkl.supabase.co
   SUPABASE_ANON_KEY: 'sb_publishable_WlLOJ69HXuBnxs47eDPjyw_agbE0kBR',  // 예: eyJhbGciOi... (publishable / anon key)
