@@ -1296,6 +1296,13 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
   });
 
   const [quota, setQuota] = useState(null);
+  const [diag, setDiag] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function doHardRefresh() {
+    setRefreshing(true);
+    await window.RV_APP.hardRefresh();
+  }
 
   const loadInvites = useCallback(async () => {
     try { setInvites(await DB.pendingInvites(ledger.id)); } catch (e) {}
@@ -1305,8 +1312,9 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
   useEffect(() => {
     let alive = true;
     DB.aiQuota().then((q) => { if (alive) setQuota(q); });
+    window.RV_APP.diagnostics(session).then((d) => { if (alive) setDiag(d); });
     return () => { alive = false; };
-  }, []);
+  }, [session]);
 
   async function saveFields() {
     setErr(''); setMsg('');
@@ -1333,8 +1341,6 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
       <div className="rv-body">
         {msg && <Banner kind="info" onClose={() => setMsg('')}>{msg}</Banner>}
         {err && <Banner kind="error" onClose={() => setErr('')}>{err}</Banner>}
-
-        <p className="rv-muted">{session.user.email} 로 로그인됨</p>
 
         {ledgers.length > 1 && (
           <label className="rv-label">보고 있는 장부
@@ -1423,6 +1429,11 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
           </>
         )}
 
+        {/* ---- 계정 ---- */}
+        <h3 className="rv-h3"><L k="account" /></h3>
+        <p className="rv-muted rv-small">{session.user.email}</p>
+        <button className="rv-btn-ghost rv-wide" onClick={() => DB.signOut()}><L k="signOut" /></button>
+
         <h3 className="rv-h3"><L k="aiUsage" /></h3>
         {quota ? (
           <>
@@ -1444,7 +1455,54 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
           </p>
         )}
 
-        <button className="rv-btn-ghost rv-wide" onClick={() => DB.signOut()}><L k="signOut" /></button>
+        {/* ---- 데이터와 개인정보 ---- */}
+        <h3 className="rv-h3"><L k="dataPrivacy" /></h3>
+        <p className="rv-muted rv-small">
+          영수증과 사진은 Supabase에 저장되고, <strong>같은 장부에 속한 사람만</strong> 볼 수 있어.
+          다른 장부의 자료는 서로 보이지 않아. 영수증 사진을 AI로 읽을 때는 그 이미지가
+          Anthropic API로 한 번 전달되고, 결과만 돌아온 뒤 따로 보관되지 않아.
+          자동 인식을 끄면 사진은 이 앱 밖으로 나가지 않아.
+        </p>
+
+        {/* ---- 점검 ---- */}
+        <h3 className="rv-h3"><L k="maintenance" /></h3>
+        <button className="rv-btn-ghost rv-wide" onClick={doHardRefresh} disabled={refreshing}>
+          {refreshing ? '비우는 중...' : <><L k="hardRefresh" /></>}
+        </button>
+        <p className="rv-muted rv-small">
+          저장된 캐시와 서비스워커를 지우고 최신 파일을 새로 받아. 코드를 고쳤는데 화면이
+          그대로일 때 누르면 돼. 영수증 자료는 서버에 있으니 지워지지 않아.
+        </p>
+
+        {/* ---- 연결 상태 (개발 중에만) ---- */}
+        {window.RV_APP.isDev() && diag && (
+          <>
+            <h3 className="rv-h3"><L k="diagnostics" /></h3>
+            <div className="rv-diag">
+              {diag.map((d) => (
+                <div key={d.k} className={'rv-diag-row' + (d.bad ? ' rv-diag-bad' : '')}>
+                  <span className="rv-diag-k">{d.k}</span>
+                  <span className="rv-diag-v">{d.v}</span>
+                </div>
+              ))}
+            </div>
+            <p className="rv-muted rv-small">
+              <strong>Files updated</strong> 는 지금 열려 있는 코드가 언제 서버에 올라간 건지야.
+              파일을 올린 뒤 이 시각이 안 바뀌면 아직 반영이 안 된 거야.
+            </p>
+          </>
+        )}
+
+        {/* ---- 앱 정보 ---- */}
+        <h3 className="rv-h3"><L k="about" /></h3>
+        <div className="rv-about">
+          <div className="rv-about-name">{window.RV_CONFIG.APP_NAME}</div>
+          <div className="rv-muted rv-small">
+            v{window.RV_APP.version()}
+            {window.RV_APP.isDev() && <span className="rv-stage">개발중</span>}
+          </div>
+          <div className="rv-muted rv-small">{window.RV_APP.copyright()}</div>
+        </div>
       </div>
     </div>
   );

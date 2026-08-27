@@ -69,6 +69,16 @@ window.RV_T = {
   line:          { en: 'Line',          ko: '줄번호' },
   items:         { en: 'Items',         ko: '건수' },
 
+  // --- 앱 정보 ---
+  about:         { en: 'About',          ko: '앱 정보' },
+  appVersion:    { en: 'Version',        ko: '버전' },
+  developer:     { en: 'Developer',      ko: '만든 사람' },
+  maintenance:   { en: 'Maintenance',    ko: '점검' },
+  hardRefresh:   { en: 'Force Refresh',  ko: '강제 갱신' },
+  diagnostics:   { en: 'Diagnostics',    ko: '연결 상태' },
+  dataPrivacy:   { en: 'Data & Privacy', ko: '데이터와 개인정보' },
+  account:       { en: 'Account',        ko: '계정' },
+
   // --- 양쪽에서 그대로 쓰는 말 (영문만) ---
   email:         { en: 'Email' },
   aiUsage:       { en: 'AI Usage' },

@@ -133,6 +133,22 @@
   .rv-quota-fill{height:100%;background:var(--tan);border-radius:99px;
                  transition:width .3s}
 
+  /* ---------- 연결 상태 · 앱 정보 ---------- */
+  .rv-diag{margin-top:10px;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+  .rv-diag-row{display:flex;justify-content:space-between;gap:12px;align-items:baseline;
+               padding:10px 13px;font-size:13px;
+               border-bottom:1px solid rgba(255,255,255,.05)}
+  .rv-diag-row:last-child{border-bottom:none}
+  .rv-diag-k{color:var(--muted);font-size:12px;white-space:nowrap}
+  .rv-diag-v{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+             text-align:right;overflow-wrap:anywhere}
+  .rv-diag-bad .rv-diag-v{color:var(--red)}
+  .rv-about{margin-top:10px;padding:16px;border-radius:12px;
+            background:var(--panel2);border:1px solid var(--line);text-align:center}
+  .rv-about-name{font-size:16px;font-weight:700;color:var(--tan);letter-spacing:-.2px}
+  .rv-stage{margin-left:8px;padding:1px 7px;border-radius:20px;font-size:10px;
+            background:var(--tan-dim);color:#20180c}
+
   /* ---------- 세무사 자료 점검 ---------- */
   .rv-gaps{margin-top:16px;padding:14px;border-radius:12px;
            background:#2c2410;border:1px solid #5a4715}

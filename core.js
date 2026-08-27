@@ -598,6 +598,82 @@
     },
   };
 
+  // =============================================================
+  // RV_APP — 앱 자체에 대한 것 (버전 확인, 강제 갱신, 진단)
+  // =============================================================
+  var RV_APP = {
+    version: function () {
+      return (CFG.APP_VERSION || '0.0.0');
+    },
+
+    copyright: function () {
+      return '© ' + (CFG.COPYRIGHT_YEAR || new Date().getFullYear()) +
+             ' ' + (CFG.DEVELOPER || '');
+    },
+
+    isDev: function () { return (CFG.STAGE || 'dev') === 'dev'; },
+
+    // 지금 브라우저가 들고 있는 app.jsx 가 언제 서버에 올라간 것인지.
+    // 버전 번호를 손으로 올리는 걸 잊어도 이 값은 자동으로 바뀌므로,
+    // "내가 방금 올린 파일이 실제로 반영됐나" 를 이걸로 확인한다.
+    lastDeployed: async function () {
+      try {
+        var res = await fetch('app.jsx?probe=' + Date.now(), { method: 'HEAD', cache: 'no-store' });
+        var lm = res.headers.get('Last-Modified');
+        if (!lm) return null;
+        var d = new Date(lm);
+        return isNaN(d.getTime()) ? null : d;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    // 캐시와 서비스워커를 통째로 비우고 새로 받는다.
+    // 태블릿에는 개발자 도구가 없어서 "고쳤는데 안 바뀐다" 를 풀 방법이 마땅치 않다.
+    // 이 버튼이 그 역할을 한다.
+    hardRefresh: async function () {
+      try {
+        if ('serviceWorker' in navigator) {
+          var regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(function (r) { return r.unregister(); }));
+        }
+      } catch (e) {}
+      try {
+        if (window.caches) {
+          var keys = await caches.keys();
+          await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        }
+      } catch (e) {}
+      // 주소에 시각을 붙여 브라우저 캐시까지 확실히 우회한다
+      window.location.replace(window.location.pathname + '?fresh=' + Date.now());
+    },
+
+    // 무엇이 연결돼 있고 무엇이 안 됐는지. 문제가 생겼을 때 여기부터 본다.
+    diagnostics: async function (session) {
+      var out = [];
+      out.push({ k: 'App URL', v: window.location.origin + window.location.pathname });
+      out.push({ k: 'Version', v: 'v' + RV_APP.version() + ' · ' + (CFG.STAGE || 'dev') });
+      out.push({ k: 'Signed in', v: session ? session.user.email : '아니오' });
+      out.push({
+        k: 'Database',
+        v: CFG.SUPABASE_URL ? CFG.SUPABASE_URL.replace('https://', '') : '미설정',
+        bad: !CFG.SUPABASE_URL,
+      });
+      out.push({
+        k: 'AI proxy',
+        v: CFG.AI_PROXY_URL ? '연결됨' : '미설정',
+        bad: !CFG.AI_PROXY_URL,
+      });
+      var d = await RV_APP.lastDeployed();
+      out.push({
+        k: 'Files updated',
+        v: d ? d.toLocaleString() : '확인 불가',
+      });
+      return out;
+    },
+  };
+
+  window.RV_APP = RV_APP;
   window.RV_UTIL = RV_UTIL;
   window.RV_DB = RV_DB;
   window.RV_AI = RV_AI;
