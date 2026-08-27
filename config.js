@@ -6,7 +6,7 @@
 
 window.RV_CONFIG = {
   APP_NAME: 'ReceiptVault',
-  APP_VERSION: '0.4.0',
+  APP_VERSION: '0.8.0',
   DEVELOPER: 'Jenny Ryu',
   COPYRIGHT_YEAR: 2026,
   STAGE: 'dev',
