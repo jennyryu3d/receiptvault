@@ -106,6 +106,44 @@
   .rv-pill-cogs{background:#22301f;border-color:#3b5535;color:#b9d6ac}
   .rv-pill-expense{background:#2a2620;border-color:#463d31;color:#d9c6a6}
 
+  /* ---------- 영문/한글 병기 라벨 ---------- */
+  /* 영문이 본문, 한글은 옆에 작게. 세무사와 화면을 같이 봐도 말이 통하게. */
+  .rv-l{display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+  .rv-l b{font-weight:600}
+  .rv-l i{font-style:normal;font-size:.78em;opacity:.6}
+  .rv-tabs .rv-l{flex-direction:column;gap:1px;align-items:center}
+  .rv-tabs .rv-l i{font-size:10px}
+  .rv-country{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:5px;
+              font-size:10px;letter-spacing:.06em;
+              background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+
+  /* ---------- 환율 ---------- */
+  .rv-fx{margin-top:14px;padding:14px;border-radius:12px;
+         background:var(--panel2);border:1px solid var(--tan-dim)}
+  .rv-fx-head{display:flex;justify-content:space-between;align-items:baseline;
+              font-size:14px;padding-bottom:8px;margin-bottom:4px;
+              border-bottom:1px solid var(--line)}
+  .rv-fx-head strong{font-size:17px}
+  .rv-cur-sel{width:104px;flex-shrink:0}
+  .rv-country-sel{width:124px;flex-shrink:0}
+
+  /* ---------- 사용량 막대 ---------- */
+  .rv-quota-bar{height:6px;border-radius:99px;background:var(--panel2);
+                border:1px solid var(--line);overflow:hidden;margin:8px 0}
+  .rv-quota-fill{height:100%;background:var(--tan);border-radius:99px;
+                 transition:width .3s}
+
+  /* ---------- 세무사 자료 점검 ---------- */
+  .rv-gaps{margin-top:16px;padding:14px;border-radius:12px;
+           background:#2c2410;border:1px solid #5a4715}
+  .rv-gaps-head{font-size:13px;color:#f0d79a;margin-bottom:10px}
+  .rv-gap{display:flex;gap:12px;align-items:flex-start;padding:8px 0;
+          border-bottom:1px solid rgba(255,255,255,.06);font-size:14px}
+  .rv-gap:last-of-type{border-bottom:none}
+  .rv-gap-n{flex-shrink:0;min-width:26px;text-align:center;padding:1px 6px;
+            border-radius:20px;background:#5a4715;color:#f0d79a;
+            font-size:12px;font-variant-numeric:tabular-nums}
+
   /* ---------- 화면 아래 고정 알림 ---------- */
   /* 저장 버튼 옆에서 결과가 보여야 한다. 폼 맨 위에 띄우면 화면 밖이라 안 보인다. */
   .rv-fixed-note{
@@ -245,6 +283,7 @@
      파일을 전부 한 층에 둔 이유는 태블릿에서 GitHub에 올리기 위해서다 —
      안드로이드 파일 선택기가 폴더를 통째로 고르지 못한다. -->
 <script src="config.js"></script>
+<script src="labels.js"></script>
 <script src="categories.js"></script>
 <script src="core.js"></script>
 <script type="text/babel" src="app.jsx"></script>

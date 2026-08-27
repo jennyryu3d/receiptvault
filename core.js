@@ -65,31 +65,81 @@
       return p[0] + '년 ' + Number(p[1]) + '월';
     },
 
+    // 통화 표기. 영수증에 찍힌 통화 그대로 보여줄 때 쓴다.
+    inCurrency: function (n, cur) {
+      var v = Number(n);
+      if (!isFinite(v)) v = 0;
+      try {
+        return new Intl.NumberFormat(CFG.LOCALE || 'en-US', {
+          style: 'currency', currency: cur || 'USD',
+          // 원·엔은 소수점이 없다. Intl 이 알아서 처리한다.
+        }).format(v);
+      } catch (e) {
+        return v.toFixed(2) + ' ' + (cur || '');
+      }
+    },
+
     // 영수증 하나를 "분류별 줄" 목록으로 편다.
     // 분할이 없으면 줄 하나(= 전액), 있으면 분할한 만큼.
     // 리포트·CSV·보고서가 전부 이걸 거친다 — 계산 규칙이 한 군데에만 있게.
+    //
+    // 분할 금액은 "영수증에 찍힌 통화" 로 넣는다. 영수증을 보고 옮겨 적는 거니까
+    // 그게 자연스럽다. USD 환산은 여기서 환율을 곱해 만든다.
     lines: function (r) {
       var pct = (r.business_pct == null ? 100 : r.business_pct) / 100;
+      var rate = Number(r.fx_rate);
+      if (!isFinite(rate) || rate <= 0) rate = 1;
+
+      var base = r.amount_original != null ? r.amount_original : r.total;
       var raw = (Array.isArray(r.splits) && r.splits.length)
         ? r.splits
-        : [{ category: r.category, amount: r.total, note: '' }];
+        : [{ category: r.category, amount: base, note: '' }];
 
       return raw.map(function (s) {
         var cat = window.RV_CAT(s.category);
-        var amount = RV_UTIL.parseAmount(s.amount) || 0;
+        var amount = RV_UTIL.parseAmount(s.amount) || 0;  // 영수증 통화
+        var usd = amount * rate;
         return {
           category: cat.key,
           cat: cat,
-          amount: amount,
+          amount: amount,        // 영수증에 찍힌 통화 기준
+          usd: usd,              // 달러 환산
+          currency: r.currency || 'USD',
           note: s.note || '',
           // 사업 사용 비율(차량 등) × 카테고리 공제율(식비 50%)
-          deductible: amount * pct * (cat.deduct == null ? 1 : cat.deduct),
+          deductible: usd * pct * (cat.deduct == null ? 1 : cat.deduct),
         };
       });
     },
 
+    // 거래일의 공시 환율을 받아온다 (유럽중앙은행 자료, 무료·키 불필요).
+    // 주말·공휴일이면 그 직전 영업일 환율이 돌아온다.
+    fetchRate: async function (currency, dateStr) {
+      if (!currency || currency === 'USD') {
+        return { rate: 1, date: dateStr, source: 'same' };
+      }
+      var url = 'https://api.frankfurter.dev/v1/' + encodeURIComponent(dateStr) +
+                '?base=' + encodeURIComponent(currency) + '&symbols=USD';
+      var res = await fetch(url);
+      if (!res.ok) throw new Error('환율을 가져오지 못했어요 (' + res.status + ')');
+      var data = await res.json();
+      var rate = data && data.rates && data.rates.USD;
+      if (!rate) throw new Error('그 날짜의 ' + currency + ' 환율 자료가 없어요.');
+      return { rate: rate, date: data.date || dateStr, source: 'ecb' };
+    },
+
     deductible: function (r) {
       return RV_UTIL.lines(r).reduce(function (s, l) { return s + l.deductible; }, 0);
+    },
+
+    // 영수증 통화 기준 총액 (분할 검사와 화면 표시에 쓴다)
+    originalTotal: function (r) {
+      var v = RV_UTIL.parseAmount(r.amount_original != null ? r.amount_original : r.total);
+      return isFinite(v) ? v : 0;
+    },
+
+    isForeign: function (r) {
+      return !!(r.currency && r.currency !== 'USD');
     },
 
     isSplit: function (r) {
@@ -404,17 +454,31 @@
 
       var taxAmount = RV_UTIL.parseAmount(rec.tax);
 
+      // 통화 두 벌:
+      //   amount_original + currency = 영수증에 찍힌 그대로
+      //   total                      = 미국 신고에 쓰는 USD (환율을 곱한 값)
+      var currency = rec.currency || 'USD';
+      var original = RV_UTIL.parseAmount(rec.amount_original) || 0;
+      var rate = RV_UTIL.parseAmount(rec.fx_rate);
+      if (!isFinite(rate) || rate <= 0) rate = 1;
+      var usdTotal = currency === 'USD' ? original : Number((original * rate).toFixed(2));
+
       var row = {
         purchased_at: rec.purchased_at,
         merchant: rec.merchant || '',
         // 세무사에게 나가는 영문 표기. 비어 있으면 원래 이름을 그대로 쓴다.
         merchant_en: (rec.merchant_en || '').trim() || null,
         notes_en: (rec.notes_en || '').trim() || null,
+        country: rec.country || 'US',
         category: mainCategory,
         splits: splits,
-        total: RV_UTIL.parseAmount(rec.total) || 0,
+        amount_original: original,
+        currency: currency,
+        fx_rate: rate,
+        fx_rate_date: rec.fx_rate_date || rec.purchased_at,
+        fx_source: currency === 'USD' ? 'same' : (rec.fx_source || 'ecb'),
+        total: usdTotal,
         tax: isFinite(taxAmount) ? taxAmount : null,
-        currency: CFG.CURRENCY || 'USD',
         payment_method: rec.payment_method || null,
         business_pct: rec.business_pct == null ? 100 : Number(rec.business_pct),
         notes: rec.notes || null,
@@ -467,6 +531,13 @@
       var res = await c.storage.from('receipts').createSignedUrl(path, 3600);
       return res.data ? res.data.signedUrl : null;
     },
+
+    // 오늘 AI 인식을 몇 장 썼는지 (설정 화면에 보여준다)
+    aiQuota: async function () {
+      var c = supa(); if (!c) return null;
+      var res = await c.rpc('rv_ai_quota');
+      return res.error ? null : res.data;
+    },
   };
 
   // =============================================================
@@ -475,30 +546,55 @@
   var RV_AI = {
     available: function () { return !!CFG.AI_PROXY_URL; },
 
-    extract: async function (blob) {
+    // 로그인한 사람만 인식을 부를 수 있다. 토큰을 같이 보내면 Worker 가
+    // 그 토큰으로 사용량 한도를 확인하고 기록한다. 주소만 알아낸 외부인은
+    // 토큰이 없어서 아무것도 못 한다 — API 요금이 새지 않게 하는 핵심 장치다.
+    extract: async function (blob, ledgerId) {
       if (!CFG.AI_PROXY_URL) throw new Error('AI 인식이 아직 연결되지 않았어요.');
+
+      var session = await window.RV_DB.getSession();
+      if (!session) throw new Error('로그인이 필요해요.');
 
       var dataUrl = await RV_UTIL.blobToDataUrl(blob);
       var base64 = dataUrl.split(',')[1];
 
       var resp = await fetch(CFG.AI_PROXY_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + session.access_token,
+        },
         body: JSON.stringify({
           image: base64,
           media_type: 'image/jpeg',
+          ledger_id: ledgerId || null,
           categories: window.RV_CATEGORIES.map(function (c) {
             return { key: c.key, label: c.en, hint: c.hint || '' };
           }),
+          countries: (window.RV_COUNTRIES || []).map(function (c) {
+            return c.code + '=' + c.en;
+          }).join(', '),
           today: RV_UTIL.today(),
         }),
       });
 
+      var body = await resp.json().catch(function () { return null; });
+
       if (!resp.ok) {
-        var msg = await resp.text().catch(function () { return ''; });
+        // 한도 초과는 "오류" 라기보다 알려줘야 할 상태라 문구를 따로 만든다.
+        if (body && body.error === 'quota') {
+          if (body.reason === 'user_limit') {
+            throw new Error('오늘 AI 인식 한도(' + body.limit + '장)를 다 썼어. ' +
+                            '내일 다시 열려. 지금은 항목을 직접 채워도 저장은 돼.');
+          }
+          if (body.reason === 'global_limit') {
+            throw new Error('오늘 전체 인식 한도를 다 썼어. 내일 다시 열려.');
+          }
+        }
+        var msg = body ? JSON.stringify(body) : '';
         throw new Error('인식 실패 (' + resp.status + ') ' + msg.slice(0, 200));
       }
-      return await resp.json();
+      return body;
     },
   };
 

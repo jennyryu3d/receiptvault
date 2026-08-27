@@ -36,6 +36,24 @@ function hasKorean(s) {
   return /[ㄱ-ㆎ가-힣]/.test(s || '');
 }
 
+// 항목 이름표. 영문이 크고 한글이 작게 붙는다.
+// 양쪽 나라에서 그대로 쓰는 말(Email, PDF ...)은 labels.js 에 ko 가 없어서 영문만 나온다.
+function L({ k, suffix }) {
+  const t = window.RV_T[k] || { en: k };
+  return (
+    <span className="rv-l">
+      <b>{t.en}{suffix || ''}</b>
+      {t.ko && <i>{t.ko}</i>}
+    </span>
+  );
+}
+
+// 나라 표시 (US / 미국)
+function CountryTag({ code }) {
+  const c = window.RV_COUNTRY(code);
+  return <span className="rv-country" title={c.en}>{c.code}</span>;
+}
+
 function CategoryPill({ catKey }) {
   const c = window.RV_CAT(catKey);
   return (
@@ -166,12 +184,19 @@ function StartLedger({ session, onMade }) {
 const BLANK = {
   purchased_at: U.today(),
   merchant: '',
+  merchant_en: '',
+  country: 'US',
+  currency: 'USD',
+  amount_original: '',
+  fx_rate: 1,
+  fx_rate_date: '',
+  fx_source: 'same',
   category: 'cogs_material',
-  total: '',
   tax: '',
   payment_method: 'card',
   business_pct: 100,
   notes: '',
+  notes_en: '',
   source: 'manual',
   splits: [],
 };
@@ -197,15 +222,84 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
 
   function set(k, v) { setRec((r) => Object.assign({}, r, { [k]: v })); }
 
+  // ---- 통화와 환율 ----
+  const foreign = rec.currency && rec.currency !== 'USD';
+  const [fxBusy, setFxBusy] = useState(false);
+  const [fxErr, setFxErr] = useState('');
+
+  // 통화나 거래일이 바뀌면 그 날짜의 공시 환율을 가져온다.
+  // 카드 청구액으로 직접 고쳐 넣은 경우(fx_source==='manual')는 건드리지 않는다 —
+  // 실제로 청구된 금액이 공시 환율보다 정확하니까 사람이 넣은 값을 이긴다고 보면 안 된다.
+  useEffect(() => {
+    let alive = true;
+    if (!foreign) {
+      setFxErr('');
+      setRec((r) => (r.fx_rate === 1 && r.fx_source === 'same') ? r
+        : Object.assign({}, r, { fx_rate: 1, fx_source: 'same', fx_rate_date: r.purchased_at }));
+      return;
+    }
+    if (rec.fx_source === 'manual') return;
+    if (!rec.purchased_at) return;
+
+    setFxBusy(true); setFxErr('');
+    U.fetchRate(rec.currency, rec.purchased_at).then(
+      (got) => {
+        if (!alive) return;
+        setFxBusy(false);
+        setRec((r) => Object.assign({}, r, {
+          fx_rate: got.rate, fx_rate_date: got.date, fx_source: 'ecb',
+        }));
+      },
+      (ex) => {
+        if (!alive) return;
+        setFxBusy(false);
+        setFxErr(ex.message || '환율을 가져오지 못했어요. 달러 금액을 직접 넣어줘.');
+      }
+    );
+    return () => { alive = false; };
+  }, [rec.currency, rec.purchased_at, rec.fx_source]);
+
+  const originalAmount = U.parseAmount(rec.amount_original) || 0;
+  const usdAmount = foreign
+    ? originalAmount * (Number(rec.fx_rate) || 0)
+    : originalAmount;
+
+  // 카드에 실제로 청구된 달러 금액을 직접 넣으면, 그 값에서 환율을 거꾸로 계산한다.
+  function setUsdManually(v) {
+    const usd = U.parseAmount(v);
+    if (!isFinite(usd) || originalAmount <= 0) return;
+    setRec((r) => Object.assign({}, r, {
+      fx_rate: usd / originalAmount,
+      fx_source: 'manual',
+      fx_rate_date: r.purchased_at,
+    }));
+  }
+
+  function resetFx() {
+    setRec((r) => Object.assign({}, r, { fx_source: 'ecb' }));
+  }
+
+  // 나라를 고르면 그 나라 통화를 기본으로 맞춰준다 (직접 바꿀 수 있음)
+  function setCountry(code) {
+    const c = window.RV_COUNTRY(code);
+    setRec((r) => Object.assign({}, r, {
+      country: code,
+      currency: r.currency === 'USD' || r.currency === window.RV_COUNTRY(r.country).currency
+        ? c.currency : r.currency,
+      fx_source: 'ecb',
+    }));
+  }
+
   // ---- 분할 ----
+  // 분할 금액은 영수증에 찍힌 통화 기준이다. 영수증을 보고 옮겨 적으니까.
   const splits = rec.splits || [];
   const splitting = splits.length > 0;
-  const remainder = U.splitRemainder(rec.total, splits);
+  const remainder = U.splitRemainder(rec.amount_original, splits);
 
   function startSplit() {
     setRec((r) => Object.assign({}, r, {
       splits: [
-        { category: r.category, amount: r.total || '', note: '' },
+        { category: r.category, amount: r.amount_original || '', note: '' },
         { category: 'supplies', amount: '', note: '' },
       ],
     }));
@@ -257,7 +351,7 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
 
       if (AI.available()) {
         setBusy('영수증 읽는 중...');
-        const got = await AI.extract(small);
+        const got = await AI.extract(small, ledgerId);
 
         // AI가 제안한 분할은 그대로 믿지 않는다.
         // 분류 key 가 실제로 있고, 합계가 총액과 맞을 때만 받아들인다.
@@ -273,13 +367,21 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
           }
         }
 
+        const cur = (window.RV_CURRENCIES || []).includes(got.currency) ? got.currency : null;
+        const ctry = window.RV_COUNTRIES.some((c) => c.code === got.country) ? got.country : null;
+
         setRec((r) => Object.assign({}, r, {
           splits: aiSplits,
           purchased_at: got.purchased_at || r.purchased_at,
           merchant: got.merchant || r.merchant,
           merchant_en: got.merchant_en || r.merchant_en || '',
           notes_en: got.notes_en || r.notes_en || '',
-          total: got.total != null ? String(got.total) : r.total,
+          notes: r.notes || got.notes_en || '',
+          country: ctry || r.country,
+          currency: cur || r.currency,
+          // 통화가 바뀌었으니 환율은 다시 받아오게 표시해 둔다
+          fx_source: cur && cur !== 'USD' ? 'ecb' : 'same',
+          amount_original: got.amount != null ? String(got.amount) : r.amount_original,
           tax: got.tax != null ? String(got.tax) : r.tax,
           payment_method: got.payment_method || r.payment_method,
           category: got.category && window.RV_CAT_BY_KEY[got.category] ? got.category : r.category,
@@ -296,15 +398,21 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
   }
 
   async function save() {
-    if (!rec.purchased_at) return setErr('날짜를 넣어줘.');
+    if (!rec.purchased_at) return setErr('거래일을 넣어줘.');
 
-    const amount = U.parseAmount(rec.total);
-    if (!isFinite(amount) || amount <= 0) return setErr('금액을 넣어줘. 숫자만 있으면 돼.');
+    if (!isFinite(originalAmount) || originalAmount <= 0) {
+      return setErr('금액을 넣어줘. 숫자만 있으면 돼.');
+    }
+    if (foreign && !(Number(rec.fx_rate) > 0)) {
+      return setErr('환율을 못 가져왔어. 달러 금액을 직접 넣어주면 저장돼.');
+    }
 
     if (splitting && remainder !== 0) {
+      const cur = rec.currency || 'USD';
       return setErr(
         '분할한 금액의 합이 총액과 안 맞아. ' +
-        (remainder > 0 ? U.money(remainder) + ' 남았어.' : U.money(-remainder) + ' 초과했어.')
+        (remainder > 0 ? U.inCurrency(remainder, cur) + ' 남았어.'
+                       : U.inCurrency(-remainder, cur) + ' 초과했어.')
       );
     }
 
@@ -337,7 +445,10 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
   // 분할 중이고 합계가 맞을 때만 분할 기준으로 계산한다. 안 맞는 중간 상태에서
   // 엉뚱한 숫자를 보여주면 오히려 헷갈린다.
   const calcBase = {
-    total: Number(rec.total) || 0,
+    amount_original: originalAmount,
+    total: usdAmount,
+    currency: rec.currency,
+    fx_rate: Number(rec.fx_rate) || 1,
     category: rec.category,
     business_pct: rec.business_pct,
     splits: splitting && remainder === 0 ? splits : null,
@@ -348,9 +459,9 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
   return (
     <div className="rv-screen">
       <div className="rv-topbar">
-        <button className="rv-btn-ghost" onClick={onCancel}>취소</button>
-        <strong>{editing ? '영수증 수정' : '영수증 추가'}</strong>
-        <button className="rv-btn-sm" onClick={save} disabled={!!busy}>저장</button>
+        <button className="rv-btn-ghost" onClick={onCancel}><L k="cancel" /></button>
+        <strong><L k={editing ? 'editReceipt' : 'addReceipt'} /></strong>
+        <button className="rv-btn-sm" onClick={save} disabled={!!busy}><L k="save" /></button>
       </div>
 
       {/* 화면 아래에 붙는 알림.
@@ -372,10 +483,10 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
 
         <div className="rv-photo-row">
           <button className="rv-btn-ghost rv-grow" onClick={() => cameraRef.current.click()}>
-            📷 영수증 촬영
+            📷 <L k="takePhoto" />
           </button>
           <button className="rv-btn-ghost rv-grow" onClick={() => fileRef.current.click()}>
-            🖼 스크린샷 · 갤러리
+            🖼 <L k="fromGallery" />
           </button>
         </div>
         <input ref={cameraRef} type="file" accept="image/*" capture="environment"
@@ -395,32 +506,90 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
           </div>
         )}
 
-        <label className="rv-label">날짜
+        <label className="rv-label"><L k="date" />
           <input className="rv-input" type="date" value={rec.purchased_at}
                  onChange={(e) => set('purchased_at', e.target.value)} />
         </label>
-
-        <label className="rv-label">가맹점
-          <input className="rv-input" type="text" placeholder="Tandy Leather"
-                 value={rec.merchant} onChange={(e) => set('merchant', e.target.value)} />
-        </label>
+        <p className="rv-muted rv-small">영수증에 찍힌 거래일이야. 목록도 이 날짜순으로 정렬돼.</p>
 
         <div className="rv-row">
-          <label className="rv-label rv-grow">합계 금액
-            <input className="rv-input" type="number" inputMode="decimal" step="0.01"
-                   placeholder="0.00" value={rec.total}
-                   onChange={(e) => set('total', e.target.value)} />
+          <label className="rv-label rv-grow"><L k="merchant" />
+            <input className="rv-input" type="text" placeholder="Tandy Leather"
+                   value={rec.merchant} onChange={(e) => set('merchant', e.target.value)} />
           </label>
-          <label className="rv-label rv-grow">세금 (선택)
-            <input className="rv-input" type="number" inputMode="decimal" step="0.01"
-                   placeholder="0.00" value={rec.tax || ''}
-                   onChange={(e) => set('tax', e.target.value)} />
+          <label className="rv-label rv-country-sel"><L k="country" />
+            <select className="rv-input" value={rec.country || 'US'}
+                    onChange={(e) => setCountry(e.target.value)}>
+              {window.RV_COUNTRIES.map((c) => (
+                <option key={c.code} value={c.code}>{c.code} · {c.ko}</option>
+              ))}
+            </select>
           </label>
         </div>
 
+        {/* ---- 금액: 영수증 통화 + 달러 환산 ---- */}
+        <div className="rv-row">
+          <label className="rv-label rv-cur-sel"><L k="currency" />
+            <select className="rv-input" value={rec.currency || 'USD'}
+                    onChange={(e) => setRec((r) => Object.assign({}, r,
+                      { currency: e.target.value, fx_source: 'ecb' }))}>
+              {window.RV_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label className="rv-label rv-grow"><L k="amount" />
+            <input className="rv-input" type="number" inputMode="decimal" step="0.01"
+                   placeholder="0.00" value={rec.amount_original}
+                   onChange={(e) => set('amount_original', e.target.value)} />
+          </label>
+        </div>
+        <p className="rv-muted rv-small">영수증에 찍힌 금액 그대로. 팁·세금·배송비까지 포함한 최종 결제액.</p>
+
+        {foreign && (
+          <div className="rv-fx">
+            <div className="rv-fx-head">
+              <span><L k="amountUsd" /></span>
+              <strong>{U.money(usdAmount)}</strong>
+            </div>
+
+            {fxBusy && <p className="rv-muted rv-small">환율 가져오는 중...</p>}
+            {fxErr && <p className="rv-warn-text rv-small">{fxErr}</p>}
+
+            {!fxBusy && !fxErr && (
+              <p className="rv-muted rv-small">
+                {rec.fx_source === 'manual'
+                  ? '카드 청구액으로 직접 넣은 값이야. '
+                  : '유럽중앙은행 공시 환율 (' + (rec.fx_rate_date || rec.purchased_at) + ') · '}
+                1 {rec.currency} = {Number(rec.fx_rate).toFixed(6)} USD
+              </p>
+            )}
+
+            <label className="rv-label">
+              카드에 실제로 청구된 달러 금액 (알면 이게 더 정확해)
+              <input className="rv-input" type="number" inputMode="decimal" step="0.01"
+                     placeholder={usdAmount ? usdAmount.toFixed(2) : '0.00'}
+                     onChange={(e) => setUsdManually(e.target.value)} />
+            </label>
+            {rec.fx_source === 'manual' && (
+              <button className="rv-btn-ghost rv-wide-sm" onClick={resetFx}>
+                공시 환율로 되돌리기
+              </button>
+            )}
+            <p className="rv-muted rv-small">
+              카드사 환율에는 수수료가 섞여 있어서 공시 환율과 조금 달라.
+              명세서에 찍힌 달러 금액을 넣으면 세무사가 대조할 때 딱 맞아떨어져.
+            </p>
+          </div>
+        )}
+
+        <label className="rv-label"><L k="salesTax" suffix=" (optional)" />
+          <input className="rv-input" type="number" inputMode="decimal" step="0.01"
+                 placeholder="0.00" value={rec.tax || ''}
+                 onChange={(e) => set('tax', e.target.value)} />
+        </label>
+
         {!splitting ? (
           <>
-            <label className="rv-label">분류
+            <label className="rv-label"><L k="category" />
               <CategorySelect value={rec.category} onChange={(v) => set('category', v)} />
             </label>
             <p className="rv-muted rv-small">
@@ -428,7 +597,7 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
               {cat.hint ? ' — ' + cat.hint : ''}
             </p>
             <button className="rv-btn-ghost rv-split-start" onClick={startSplit}>
-              ⑂ 분류 나누기
+              ⑂ <L k="split" />
             </button>
             <p className="rv-muted rv-small">
               가죽이랑 공구를 한 번에 산 영수증처럼, 한 장을 여러 분류로 쪼갤 때.
@@ -437,13 +606,13 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
         ) : (
           <div className="rv-splits">
             <div className="rv-splits-head">
-              <span>분류 나누기</span>
+              <span><L k="split" /></span>
               <span className={remainder === 0 ? 'rv-ok rv-small' : 'rv-warn-text rv-small'}>
                 {remainder === 0
                   ? '총액과 일치'
                   : remainder > 0
-                    ? U.money(remainder) + ' 남음'
-                    : U.money(-remainder) + ' 초과'}
+                    ? U.inCurrency(remainder, rec.currency) + ' 남음'
+                    : U.inCurrency(-remainder, rec.currency) + ' 초과'}
               </span>
             </div>
 
@@ -461,34 +630,39 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
                            onChange={(e) => setSplit(i, 'amount', e.target.value)} />
                     {remainder !== 0 && (
                       <button className="rv-btn-ghost rv-split-fill" onClick={() => fillRemainder(i)}>
-                        나머지 넣기
+                        <L k="fillRest" />
                       </button>
                     )}
                   </div>
-                  <p className="rv-muted rv-small">Schedule C {sc.line}번 · {sc.en}</p>
+                  <p className="rv-muted rv-small">
+                    Schedule C {sc.line}번 · {sc.en}
+                    {foreign && U.parseAmount(s.amount) > 0 &&
+                      ' · ' + U.money(U.parseAmount(s.amount) * (Number(rec.fx_rate) || 0))}
+                  </p>
                 </div>
               );
             })}
 
-            <button className="rv-btn-ghost rv-wide-sm" onClick={addSplit}>+ 줄 추가</button>
+            <button className="rv-btn-ghost rv-wide-sm" onClick={addSplit}>+ <L k="addLine" /></button>
             <p className="rv-muted rv-small">
-              합계가 총액 {U.money(Number(rec.total) || 0)} 과 맞아야 저장돼.
+              합계가 총액 {U.inCurrency(originalAmount, rec.currency)} 과 맞아야 저장돼.
+              금액은 <strong>영수증에 찍힌 통화</strong> 그대로 넣어 — 달러 환산은 자동으로 돼.
               줄을 하나만 남기고 지우면 분할이 자동으로 풀려.
             </p>
           </div>
         )}
 
         <div className="rv-row">
-          <label className="rv-label rv-grow">결제 수단
+          <label className="rv-label rv-grow"><L k="payment" />
             <select className="rv-input" value={rec.payment_method || 'card'}
                     onChange={(e) => set('payment_method', e.target.value)}>
-              <option value="card">카드</option>
-              <option value="cash">현금</option>
-              <option value="transfer">계좌이체</option>
-              <option value="other">기타</option>
+              <option value="card">Card · 카드</option>
+              <option value="cash">Cash · 현금</option>
+              <option value="transfer">Transfer · 계좌이체</option>
+              <option value="other">Other · 기타</option>
             </select>
           </label>
-          <label className="rv-label rv-grow">사업 사용 비율
+          <label className="rv-label rv-grow"><L k="businessUse" />
             <input className="rv-input" type="number" min="0" max="100" step="5"
                    value={rec.business_pct}
                    onChange={(e) => set('business_pct', e.target.value)} />
@@ -500,10 +674,22 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
           </p>
         )}
 
-        <label className="rv-label">메모
-          <textarea className="rv-input" rows="2" placeholder="무엇을 샀는지 한 줄"
+        {/* 사업 목적은 IRS가 요구하는 기록 항목이다. 메모가 아니라 이게 본명이다. */}
+        <label className="rv-label"><L k="purpose" />
+          <textarea className="rv-input" rows="2" spellCheck="true"
+                    placeholder="무엇을 왜 샀는지 — 예: 가방 제작용 가죽과 실"
                     value={rec.notes || ''} onChange={(e) => set('notes', e.target.value)} />
         </label>
+        <p className="rv-muted rv-small">
+          비워두면 나중에 세무사가 "이건 무슨 지출이죠?" 하고 되물어. 국세청이 요구하는
+          기록 항목이기도 해 — 날짜·금액·상호·<strong>사업 목적</strong> 네 가지야.
+        </p>
+        {cat.key === 'meals' && (
+          <Banner kind="warn">
+            식비는 기록 요건이 하나 더 있어 — <strong>누구와 함께했고 무슨 논의를 했는지</strong>를
+            위 칸에 같이 적어줘. (예: "Tandy 담당자와 가죽 단가 협의")
+          </Banner>
+        )}
 
         {/* 세무사에게 나가는 자료는 영문이어야 한다.
             가맹점이나 메모가 한글이면 여기에 영문 표기를 남겨둔다. */}
@@ -531,15 +717,15 @@ function ReceiptForm({ initial, ledgerId, session, onDone, onCancel }) {
           </div>
         )}
 
-        {Number(rec.total) > 0 && (
+        {originalAmount > 0 && (
           <div className="rv-deduct">
-            공제 반영액 <strong>{U.money(dedu)}</strong>
+            <L k="deductible" /> <strong>{U.money(dedu)}</strong>
             {halfOnly && <span className="rv-muted"> (식비는 50%만 인정)</span>}
           </div>
         )}
 
         <button className="rv-btn rv-wide" onClick={save} disabled={!!busy}>
-          {busy || '저장'}
+          {busy || <L k="save" />}
         </button>
       </div>
     </div>
@@ -595,7 +781,10 @@ function ReceiptList({ rows, loading, onOpen, onAdd, year, years, onYear, canWri
               {items.map((r) => (
                 <button key={r.id} className="rv-item" onClick={() => onOpen(r)}>
                   <div className="rv-item-main">
-                    <div className="rv-item-title">{r.merchant || '(가맹점 없음)'}</div>
+                    <div className="rv-item-title">
+                      {r.merchant || '(가맹점 없음)'}
+                      {r.country && r.country !== 'US' && <CountryTag code={r.country} />}
+                    </div>
                     <div className="rv-item-sub">
                       {U.prettyDate(r.purchased_at)} · <CategoryPill catKey={r.category} />
                       {U.isSplit(r) && (
@@ -606,7 +795,14 @@ function ReceiptList({ rows, loading, onOpen, onAdd, year, years, onYear, canWri
                       {r.image_path && <span className="rv-clip" title="사진 있음">📎</span>}
                     </div>
                   </div>
-                  <div className="rv-item-amt">{U.money(r.total)}</div>
+                  <div className="rv-item-amt">
+                    {U.money(r.total)}
+                    {U.isForeign(r) && (
+                      <div className="rv-muted rv-small">
+                        {U.inCurrency(U.originalTotal(r), r.currency)}
+                      </div>
+                    )}
+                  </div>
                 </button>
               ))}
             </div>
@@ -695,10 +891,6 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
   const expTotal = U.sum(s.expense);
   const prepared = U.today();
 
-  const withImage = rows.filter((r) => r.image_path).length;
-  const hasHalf = s.expense.some((e) => e.cat.deduct < 1);
-  const hasPartial = rows.some((r) => r.business_pct < 100);
-
   const nameFor = useCallback((uid) => {
     const m = members.find((x) => x.user_id === uid);
     return m ? U.shortName(m.email) : '—';
@@ -711,26 +903,74 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
     (r) => (hasKorean(r.merchant) && !r.merchant_en) || (hasKorean(r.notes) && !r.notes_en)
   ).length;
 
+  const withImage = rows.filter((r) => r.image_path).length;
+  const hasHalf = s.expense.some((e) => e.cat.deduct < 1);
+  const hasPartial = rows.some((r) => r.business_pct < 100);
+
+  // 외화로 산 것들 — 환율 근거를 문서에 남겨야 한다
+  const foreignRows = rows.filter((r) => U.isForeign(r));
+  const currencies = Array.from(new Set(foreignRows.map((r) => r.currency)));
+  const manualFx = foreignRows.filter((r) => r.fx_source === 'manual').length;
+
+  // 국세청이 요구하는 기록은 날짜·금액·상호·사업 목적 네 가지다.
+  // 앞의 셋은 저장할 때 강제되지만 사업 목적은 비어 있을 수 있어서 여기서 센다.
+  const missingPurpose = rows.filter((r) => !(r.notes || '').trim() && !(r.notes_en || '').trim());
+  const missingMerchant = rows.filter((r) => !(r.merchant || '').trim());
+  const mealsRows = rows.filter((r) => U.lines(r).some((l) => l.cat.key === 'meals'));
+  const noImage = rows.filter((r) => !r.image_path);
+  const equipmentRows = rows.filter((r) => U.lines(r).some((l) => l.cat.key === 'equipment'));
+  const carRows = rows.filter((r) => U.lines(r).some((l) => l.cat.key === 'car'));
+
+  const gaps = [];
+  if (missingPurpose.length) gaps.push({
+    n: missingPurpose.length,
+    what: '사업 목적이 비어 있는 영수증',
+    why: '날짜·금액·상호와 함께 국세청이 요구하는 네 가지 중 하나야. 비면 세무사가 되물어.',
+  });
+  if (missingMerchant.length) gaps.push({
+    n: missingMerchant.length, what: '가맹점 이름이 없는 영수증',
+    why: '누구에게 지불했는지가 기록의 기본이야.',
+  });
+  if (noImage.length) gaps.push({
+    n: noImage.length, what: '사진이 없는 영수증',
+    why: '$75 넘는 지출은 증빙을 보관해야 해. 원본이 있으면 사진만 추가하면 돼.',
+  });
+  if (koreanLeft > 0) gaps.push({
+    n: koreanLeft, what: '한글이 그대로 남은 영수증',
+    why: '세무사가 못 읽어. 영문 표기를 채워줘.',
+  });
+
   function exportCsv() {
     // 세무사가 읽을 파일이라 열 이름도 분류명도 전부 영문이다.
     // 분할된 영수증은 줄마다 한 행이 되고, receipt_total 이 같은 값으로 반복돼
     // 어떤 행들이 한 장에서 나왔는지 알아볼 수 있다.
-    const head = ['date', 'merchant', 'schedule_c_line', 'category', 'amount',
-                  'business_use_pct', 'deductible', 'receipt_total', 'sales_tax',
-                  'payment_method', 'split_of_receipt', 'entered_by', 'notes', 'receipt_image'];
+    const head = ['date', 'merchant', 'country', 'schedule_c_line', 'category',
+                  'currency', 'amount_local', 'fx_rate', 'fx_rate_source', 'amount_usd',
+                  'business_use_pct', 'deductible_usd',
+                  'receipt_total_local', 'receipt_total_usd', 'sales_tax_local',
+                  'payment_method', 'split_of_receipt', 'business_purpose',
+                  'entered_by', 'entered_on', 'receipt_image'];
     const out = [head.join(',')];
 
     rows.slice().sort((a, b) => a.purchased_at.localeCompare(b.purchased_at)).forEach((r) => {
       const parts = U.lines(r);
       parts.forEach((l) => {
         out.push([
-          r.purchased_at, en(r, 'merchant'), l.cat.line, l.cat.en,
-          U.plain(l.amount), r.business_pct, U.plain(l.deductible),
-          U.plain(r.total), r.tax == null ? '' : U.plain(r.tax),
+          r.purchased_at, en(r, 'merchant'), r.country || '',
+          l.cat.line, l.cat.en,
+          r.currency || 'USD', U.plain(l.amount),
+          Number(r.fx_rate || 1).toFixed(8),
+          r.fx_source === 'manual' ? 'card statement'
+            : r.fx_source === 'same' ? 'n/a (USD)' : 'ECB published rate',
+          U.plain(l.usd),
+          r.business_pct, U.plain(l.deductible),
+          U.plain(U.originalTotal(r)), U.plain(r.total),
+          r.tax == null ? '' : U.plain(r.tax),
           r.payment_method || '',
           parts.length > 1 ? 'yes' : '',
-          nameFor(r.created_by),
           [l.note, en(r, 'notes')].filter(Boolean).join(' / '),
+          nameFor(r.created_by),
+          r.created_at ? String(r.created_at).slice(0, 10) : '',
           r.image_path ? 'on file' : '',
         ].map(U.csvCell).join(','));
       });
@@ -771,11 +1011,23 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
             인쇄 화면에서 <strong>대상</strong>을 <strong>PDF로 저장</strong>으로 바꾸면 파일로 떨어져.
             아래 보이는 그대로 나와. 세무사에게는 이 PDF 한 장과 CSV를 같이 보내면 돼.
           </p>
-          {koreanLeft > 0 && (
-            <Banner kind="warn">
-              한글이 그대로 남은 영수증이 {koreanLeft}건 있어. CSV에 한글로 나가서 세무사가 못 읽어.
-              그 영수증을 열어 <strong>세무사용 영문 표기</strong>를 채워줘.
-            </Banner>
+          {gaps.length > 0 && (
+            <div className="rv-gaps">
+              <div className="rv-gaps-head">보내기 전에 채우면 좋을 것</div>
+              {gaps.map((g, i) => (
+                <div key={i} className="rv-gap">
+                  <span className="rv-gap-n">{g.n}</span>
+                  <div>
+                    <div>{g.what}</div>
+                    <div className="rv-muted rv-small">{g.why}</div>
+                  </div>
+                </div>
+              ))}
+              <p className="rv-muted rv-small">
+                지금 이대로 보내도 문서는 나와. 다만 위 항목들은 세무사가 결국 되묻는 것들이라,
+                지금 채우는 게 나중에 영수증을 다시 뒤지는 것보다 싸.
+              </p>
+            </div>
           )}
         </div>
 
@@ -794,6 +1046,8 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
                 <tr><td>Period</td><td>Jan 1 – Dec 31, {year}</td></tr>
                 <tr><td>Prepared</td><td>{prepared}</td></tr>
                 <tr><td>Records</td><td>{rows.length} receipts</td></tr>
+                <tr><td>Currency</td><td>All figures in USD</td></tr>
+                <tr><td>Basis</td><td>Cash — dated when paid</td></tr>
               </tbody>
             </table>
           </header>
@@ -849,6 +1103,33 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
             </table>
           </section>
 
+          {foreignRows.length > 0 && (
+            <section className="tx-sec">
+              <h2>Foreign-currency purchases</h2>
+              <table className="tx-table">
+                <thead>
+                  <tr><th>Date</th><th>Merchant</th><th>Currency</th>
+                      <th className="tx-num">Local</th><th className="tx-num">Rate</th>
+                      <th className="tx-num">USD</th><th>Rate source</th></tr>
+                </thead>
+                <tbody>
+                  {foreignRows.slice().sort((a, b) => a.purchased_at.localeCompare(b.purchased_at))
+                    .map((r) => (
+                    <tr key={r.id}>
+                      <td>{r.purchased_at}</td>
+                      <td>{en(r, 'merchant')}</td>
+                      <td>{r.currency}</td>
+                      <td className="tx-num">{U.plain(U.originalTotal(r))}</td>
+                      <td className="tx-num">{Number(r.fx_rate || 1).toFixed(6)}</td>
+                      <td className="tx-num">{U.plain(r.total)}</td>
+                      <td>{r.fx_source === 'manual' ? 'card statement' : 'ECB, transaction date'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
           <section className="tx-notes">
             <h3>Notes</h3>
             <ul>
@@ -858,11 +1139,39 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
                 <li>Mixed-use items (e.g. vehicle) are reduced by the recorded
                     business-use percentage. Per-receipt percentages are in the CSV.</li>
               )}
+              {foreignRows.length > 0 && (
+                <li>
+                  {foreignRows.length} purchase{foreignRows.length > 1 ? 's were' : ' was'} made in{' '}
+                  {currencies.join(', ')} and translated to USD at the rate prevailing on the
+                  transaction date (European Central Bank published rates)
+                  {manualFx > 0 && <>; {manualFx} used the amount actually charged by the card issuer</>}.
+                  Per-receipt rates and sources are listed above and in the CSV.
+                </li>
+              )}
               <li>{withImage} of {rows.length} receipts have a stored image; originals can be
                   provided on request.</li>
-              <li>Category assignments were made by the taxpayer at the time of entry and
-                  should be reviewed before filing.</li>
-              <li>Inventory (Schedule C Part III, beginning and ending) is not tracked here.</li>
+              {missingPurpose.length > 0 && (
+                <li><strong>{missingPurpose.length}</strong> receipt
+                    {missingPurpose.length > 1 ? 's have' : ' has'} no business purpose recorded.</li>
+              )}
+              {mealsRows.length > 0 && (
+                <li>Meals: attendees and business discussion are recorded in the business-purpose
+                    field per receipt (see CSV).</li>
+              )}
+              {equipmentRows.length > 0 && (
+                <li><strong>Needs your decision:</strong> {equipmentRows.length} equipment purchase
+                    {equipmentRows.length > 1 ? 's are' : ' is'} listed under line 13. These are
+                    capital items — please advise on depreciation vs. Section 179 election.</li>
+              )}
+              {carRows.length > 0 && (
+                <li><strong>Incomplete:</strong> vehicle costs (line 9) are receipt-based only.
+                    No mileage log is kept in this system.</li>
+              )}
+              <li><strong>Not tracked here:</strong> beginning and ending inventory
+                  (Schedule C Part III), home-office expenses, and any non-receipt items such as
+                  bank fees drawn directly from the account.</li>
+              <li>Category assignments were made by the taxpayer at entry and should be reviewed
+                  before filing.</li>
             </ul>
           </section>
 
@@ -901,7 +1210,21 @@ function Detail({ rec, members, canWrite, onEdit, onDeleted, onBack }) {
       </div>
       <div className="rv-body">
         <div className="rv-detail-amt">{U.money(rec.total)}</div>
-        <div className="rv-muted">{rec.purchased_at} · <CategoryPill catKey={rec.category} /></div>
+        {U.isForeign(rec) && (
+          <div className="rv-muted">
+            {U.inCurrency(U.originalTotal(rec), rec.currency)} · 1 {rec.currency} ={' '}
+            {Number(rec.fx_rate).toFixed(6)} USD
+            <div className="rv-small">
+              {rec.fx_source === 'manual'
+                ? '카드 청구액 기준'
+                : '유럽중앙은행 공시 환율 (' + (rec.fx_rate_date || rec.purchased_at) + ')'}
+            </div>
+          </div>
+        )}
+        <div className="rv-muted">
+          {rec.purchased_at} · <CategoryPill catKey={rec.category} />
+          {rec.country && <CountryTag code={rec.country} />}
+        </div>
 
         {U.isSplit(rec) ? (
           <div className="rv-splits rv-splits-view">
@@ -927,13 +1250,19 @@ function Detail({ rec, members, canWrite, onEdit, onDeleted, onBack }) {
           </p>
         )}
 
-        {members.length > 1 && (
-          <p className="rv-muted rv-small">
-            넣은 사람 {enteredBy ? U.shortName(enteredBy.email) : '—'}
-          </p>
-        )}
+        <p className="rv-muted rv-small">
+          {members.length > 1 && (
+            <><L k="enteredBy" /> {enteredBy ? U.shortName(enteredBy.email) : '—'} · </>
+          )}
+          <L k="uploadedAt" /> {rec.created_at ? String(rec.created_at).slice(0, 16).replace('T', ' ') : '—'}
+        </p>
 
-        {rec.notes && <p className="rv-note">{rec.notes}</p>}
+        {rec.notes
+          ? <p className="rv-note">{rec.notes}</p>
+          : <Banner kind="warn">
+              사업 목적이 비어 있어. 세무사 자료에 "무슨 지출인지"가 안 나가.
+              수정에서 한 줄만 적어줘.
+            </Banner>}
         {url && <div className="rv-preview"><img src={url} alt="영수증" /></div>}
 
         {canWrite && (confirming ? (
@@ -966,11 +1295,18 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
     taxpayer_name: ledger.taxpayer_name || '',
   });
 
+  const [quota, setQuota] = useState(null);
+
   const loadInvites = useCallback(async () => {
     try { setInvites(await DB.pendingInvites(ledger.id)); } catch (e) {}
   }, [ledger.id]);
 
   useEffect(() => { loadInvites(); }, [loadInvites]);
+  useEffect(() => {
+    let alive = true;
+    DB.aiQuota().then((q) => { if (alive) setQuota(q); });
+    return () => { alive = false; };
+  }, []);
 
   async function saveFields() {
     setErr(''); setMsg('');
@@ -1087,11 +1423,28 @@ function Settings({ session, ledger, ledgers, members, isOwner, onSwitch, onRelo
           </>
         )}
 
-        <h3 className="rv-h3">기타</h3>
-        <p className="rv-muted rv-small">
-          통화 {window.RV_CONFIG.CURRENCY} · 자동 인식 {AI.available() ? '연결됨' : '아직 연결 전'}
-        </p>
-        <button className="rv-btn-ghost rv-wide" onClick={() => DB.signOut()}>로그아웃</button>
+        <h3 className="rv-h3"><L k="aiUsage" /></h3>
+        {quota ? (
+          <>
+            <p className="rv-muted rv-small">
+              오늘 {quota.used} / {quota.limit}장 사용
+            </p>
+            <div className="rv-quota-bar">
+              <div className="rv-quota-fill"
+                   style={{ width: Math.min(100, (quota.used / quota.limit) * 100) + '%' }} />
+            </div>
+            <p className="rv-muted rv-small">
+              한 사람이 하루에 인식할 수 있는 장수야. 요금이 새는 걸 막는 장치라
+              한도에 걸려도 항목을 직접 채워 저장하는 건 그대로 돼. 늘리고 싶으면 말해줘.
+            </p>
+          </>
+        ) : (
+          <p className="rv-muted rv-small">
+            자동 인식 {AI.available() ? '연결됨' : '아직 연결 전'}
+          </p>
+        )}
+
+        <button className="rv-btn-ghost rv-wide" onClick={() => DB.signOut()}><L k="signOut" /></button>
       </div>
     </div>
   );
@@ -1267,9 +1620,12 @@ function App() {
       )}
 
       <nav className="rv-tabs">
-        <button className={tab === 'list' ? 'on' : ''} onClick={() => setTab('list')}>영수증</button>
-        <button className={tab === 'report' ? 'on' : ''} onClick={() => setTab('report')}>정리</button>
-        <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>설정</button>
+        <button className={tab === 'list' ? 'on' : ''} onClick={() => setTab('list')}>
+          <L k="receipts" /></button>
+        <button className={tab === 'report' ? 'on' : ''} onClick={() => setTab('report')}>
+          <L k="summary" /></button>
+        <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>
+          <L k="settings" /></button>
       </nav>
     </div>
   );
