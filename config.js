@@ -11,7 +11,7 @@ window.RV_CONFIG = {
 
   // Cloudflare Worker 주소. 비워두면 AI 자동 인식 버튼이 숨겨지고
   // 수동 입력만으로 앱이 정상 동작한다.
-  AI_PROXY_URL: '',       // 예: https://receiptvault-proxy.jenny3d.workers.dev/extract
+  AI_PROXY_URL: 'https://receiptvault-proxy.jenny3d.workers.dev/extract',       // 예: https://receiptvault-proxy.jenny3d.workers.dev/extract
 
   CURRENCY: 'USD',
   LOCALE: 'en-US',
