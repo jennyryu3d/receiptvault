@@ -1345,13 +1345,16 @@ function Report({ rows, year, ledger, onTaxDoc, onOpen }) {
   const s = useMemo(() => U.summarize(rows), [rows]);
   const P = window.RV_KIND(ledger.kind);
 
-  // 보는 방식 세 가지.
-  //   line   — 신고서 줄번호 순. 세무사와 같은 순서라 기본값.
-  //   amount — 분류를 금액 큰 순으로. "어느 항목에 제일 많이 썼나"
-  //   items  — 영수증 한 장씩 큰 순으로. "어느 지출이 제일 컸나"
+  // 보는 방식 두 가지.
+  //   line — 신고서 줄번호 순. 세무사와 같은 순서라 기본값.
+  //   big  — 금액 큰 순. 분류도 큰 것부터 서고, 그 안의 영수증도 펼쳐서 큰 것부터.
+  //
+  // 예전엔 "항목 큰 순" 과 "지출 큰 순" 을 따로 뒀는데, 실제로 쓰는 분류는
+  // 두세 개뿐이라 분류를 줄 세우는 것 자체는 뜻이 없었다. 궁금한 건 늘
+  // "그 안에서 어느 지출이 컸나" 라서 하나로 합쳤다.
   const [view, setView] = useState('line');
 
-  // 분류를 누르면 그 안에 어떤 영수증들이 있는지 펼친다.
+  // 신고서 순으로 볼 때는 분류를 눌러야 펼쳐진다. 큰 순에서는 전부 펼쳐진다.
   const [openCat, setOpenCat] = useState(null);
 
   // 분류별 영수증 목록. 분할된 영수증은 그 분류에 해당하는 줄만 잡힌다.
@@ -1367,13 +1370,6 @@ function Report({ rows, year, ledger, onTaxDoc, onOpen }) {
     Object.keys(m).forEach((k) => m[k].sort((a, b) => b.usd - a.usd));
     return m;
   }, [rows]);
-
-  // 영수증 한 장씩 — 큰 지출부터
-  const bigItems = useMemo(() => rows.map((r) => ({
-    rec: r,
-    usd: U.lines(r).reduce((t, l) => t + l.usd, 0),
-    deduct: U.deductible(r),
-  })).sort((a, b) => b.usd - a.usd), [rows]);
 
   function ReceiptRow({ rec, usd, deduct, note }) {
     return (
@@ -1407,7 +1403,7 @@ function Report({ rows, year, ledger, onTaxDoc, onOpen }) {
     // 그대로 합치면 원화와 달러를 더하는 셈이 된다. 실제로 그 버그를 냈다.
     const val = (e) => (gross ? e.usd : e.deduct);
     const total = items.reduce((t, e) => t + val(e), 0);
-    const shown = view === 'amount'
+    const shown = view === 'big'
       ? items.slice().sort((a, b) => val(b) - val(a))
       : items;
 
@@ -1425,7 +1421,8 @@ function Report({ rows, year, ledger, onTaxDoc, onOpen }) {
           <tbody>
             {shown.map((e) => {
               const share = total > 0 ? Math.max(1, (val(e) / total) * 100) : 0;
-              const open = openCat === e.cat.key;
+              // 큰 순에서는 굳이 누르지 않아도 안이 보여야 한다 — 그게 이 화면의 목적이다.
+              const open = view === 'big' || openCat === e.cat.key;
               return (
                 <React.Fragment key={e.cat.key}>
                   <tr className="rv-cat-row"
@@ -1434,7 +1431,9 @@ function Report({ rows, year, ledger, onTaxDoc, onOpen }) {
                     <td>
                       <div>
                         {e.cat.ko}
-                        <span className="rv-caret">{open ? '▾' : '▸'}</span>
+                        {view === 'line' && (
+                          <span className="rv-caret">{open ? '▾' : '▸'}</span>
+                        )}
                       </div>
                       <div className="rv-muted rv-small">{e.cat.en} · {e.n}건</div>
                       {/* 비중 막대. 숫자를 읽기 전에 어디가 큰지 먼저 보이게. */}
@@ -1483,41 +1482,23 @@ function Report({ rows, year, ledger, onTaxDoc, onOpen }) {
             <button className={view === 'line' ? 'on' : ''} onClick={() => setView('line')}>
               {P.lineLabel ? '신고서 순' : '기본 순'}
             </button>
-            <button className={view === 'amount' ? 'on' : ''} onClick={() => setView('amount')}>
-              항목 큰 순
+            <button className={view === 'big' ? 'on' : ''} onClick={() => setView('big')}>
+              큰 지출부터
             </button>
-            <button className={view === 'items' ? 'on' : ''} onClick={() => setView('items')}>
-              지출 큰 순
-            </button>
-          </div>
-        )}
-
-        {/* 영수증 한 장씩 — 어느 지출이 제일 컸나 */}
-        {view === 'items' && rows.length > 0 && (
-          <div className="rv-report-sec">
-            <div className="rv-report-head">
-              <span className="rv-report-title">큰 지출부터</span>
-              <strong>{bigItems.length}건</strong>
-            </div>
-            <p className="rv-muted rv-small">
-              영수증 한 장씩, 쓴 돈이 큰 순서야. 눌러서 그 영수증을 열 수 있어.
-            </p>
-            {bigItems.map((x, i) => (
-              <ReceiptRow key={i} rec={x.rec} usd={x.usd} deduct={x.deduct}
-                          note={window.RV_CAT(x.rec.category).ko} />
-            ))}
           </div>
         )}
 
         {/* 분류별 — 어떤 칸이 몇 개 나오는지는 장부 종류가 정한다 */}
-        {view !== 'items' && P.report.sections.map((sec) => (
+        {P.report.sections.map((sec) => (
           <Section key={sec.group} group={sec.group} title={sec.title} note={sec.note}
                    gross={!!sec.gross} items={s.group(sec.group)} />
         ))}
 
-        {view !== 'items' && rows.length > 0 && (
+        {rows.length > 0 && (
           <p className="rv-muted rv-small">
-            분류를 누르면 그 안에 어떤 영수증이 있는지 큰 순서로 펼쳐져.
+            {view === 'line'
+              ? '분류를 누르면 그 안에 어떤 영수증이 있는지 큰 순서로 펼쳐져.'
+              : '분류도, 그 안의 영수증도 큰 것부터야. 영수증을 누르면 바로 열려.'}
           </p>
         )}
 
