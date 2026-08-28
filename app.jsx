@@ -567,8 +567,11 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
   }
 
   function fillRemainder(i) {
-    const cur = Number(splits[i].amount) || 0;
-    setSplit(i, 'amount', (cur + remainder).toFixed(2));
+    const cur = U.parseAmount(splits[i].amount) || 0;
+    const next = cur + remainder;
+    // 원·엔에는 소수점이 없다. 2000.00 처럼 찍히면 영수증과 달라 보인다.
+    const zeroDec = rec.currency === 'KRW' || rec.currency === 'JPY';
+    setSplit(i, 'amount', zeroDec ? String(Math.round(next)) : next.toFixed(2));
   }
 
   async function pickImage(e, source) {
@@ -689,6 +692,10 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
       return setErr('환율을 못 가져왔어. 달러 금액을 직접 넣어주면 저장돼.');
     }
 
+    if (splitting && splits.some((x) => !(U.parseAmount(x.amount) > 0))) {
+      return setErr('분할한 줄 중에 금액이 빈 게 있어. 금액을 넣거나 그 줄을 지워줘.');
+    }
+
     if (splitting && remainder !== 0) {
       const cur = rec.currency || 'USD';
       return setErr(
@@ -738,7 +745,9 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     splits: splitting && remainder === 0 ? splits : null,
   };
   const dedu = U.deductible(calcBase);
-  const halfOnly = U.lines(calcBase).some((l) => l.cat.deduct < 1);
+  // 절반만 인정되는 분류(식비)가 있을 때만 안내한다.
+  // 0% 분류(개인 용품)까지 걸리면 엉뚱하게 "식비는 50%" 가 뜬다.
+  const halfOnly = U.lines(calcBase).some((l) => l.cat.deduct > 0 && l.cat.deduct < 1);
 
   return (
     <div className="rv-screen">
@@ -941,38 +950,71 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
               </span>
             </div>
 
+            {/* 줄마다 번호를 달고 칸마다 이름표를 붙인다.
+                예전엔 분류 상자와 숫자 상자만 나란히 있어서 두 줄이 똑같이 보였고,
+                어느 게 무슨 칸인지 알 수가 없었다. */}
             {splits.map((s, i) => {
               const sc = window.RV_CAT(s.category);
+              const amt = U.parseAmount(s.amount);
+              const empty = !(amt > 0);
               return (
-                <div key={i} className="rv-split-row">
-                  <div className="rv-split-top">
-                    <CategorySelect value={s.category} ledger={ledger} onChange={(v) => setSplit(i, 'category', v)} />
-                    <button className="rv-split-x" onClick={() => removeSplit(i)} title="이 줄 지우기">✕</button>
+                <div key={i} className={'rv-split-row' + (empty ? ' rv-split-empty' : '')}>
+                  <div className="rv-split-head">
+                    <span className="rv-split-n">{i + 1}</span>
+                    <span className="rv-split-title">{i + 1}번째 항목</span>
+                    <button className="rv-split-x" onClick={() => removeSplit(i)}
+                            title="이 줄 지우기">✕ 지우기</button>
                   </div>
-                  <div className="rv-split-bottom">
-                    <input className="rv-input" type="number" inputMode="decimal" step="0.01"
-                           placeholder="0.00" value={s.amount}
-                           onChange={(e) => setSplit(i, 'amount', e.target.value)} />
-                    {remainder !== 0 && (
-                      <button className="rv-btn-ghost rv-split-fill" onClick={() => fillRemainder(i)}>
-                        <L k="fillRest" />
-                      </button>
-                    )}
-                  </div>
+
+                  <label className="rv-label"><L k="category" />
+                    <CategorySelect value={s.category} ledger={ledger}
+                                    onChange={(v) => setSplit(i, 'category', v)} />
+                  </label>
+
+                  <label className="rv-label">
+                    <L k="amount" /> <span className="rv-cur-tag">{rec.currency || 'USD'}</span>
+                    <div className="rv-split-bottom">
+                      <input className="rv-input" type="number" inputMode="decimal" step="0.01"
+                             placeholder={(rec.currency === 'KRW' || rec.currency === 'JPY')
+                                          ? '0' : '0.00'}
+                             value={s.amount}
+                             onChange={(e) => setSplit(i, 'amount', e.target.value)} />
+                      {remainder !== 0 && (
+                        <button className="rv-btn-ghost rv-split-fill" onClick={() => fillRemainder(i)}>
+                          {remainder > 0
+                            ? U.inCurrency(remainder, rec.currency) + ' 넣기'
+                            : '남는 만큼 빼기'}
+                        </button>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* 무슨 품목이었는지. 세무사 CSV 에 그대로 나가고,
+                      개인 항목을 왜 뺐는지 나중에 설명해주는 게 이 한 줄이다. */}
+                  <label className="rv-label">이 줄이 무엇인지 (영문으로 쓰면 그대로 나가)
+                    <input className="rv-input" value={s.note || ''}
+                           placeholder={sc.deduct === 0 ? '예: toilet seat — personal'
+                                                        : '예: tool box, clips'}
+                           onChange={(e) => setSplit(i, 'note', e.target.value)} />
+                  </label>
+
                   <p className="rv-muted rv-small">
-                    Schedule C {sc.line}번 · {sc.en}
-                    {foreign && U.parseAmount(s.amount) > 0 &&
-                      ' · ' + U.money(U.parseAmount(s.amount) * (Number(rec.fx_rate) || 0))}
+                    {sc.line ? 'Schedule C ' + sc.line + '번 · ' : ''}{sc.en}
+                    {amt > 0 && ' · ' + U.money(amt * (Number(rec.fx_rate) || 1))}
+                    {sc.deduct === 0 && ' · 공제에는 안 들어가'}
                   </p>
+                  {empty && (
+                    <p className="rv-warn-text rv-small">금액을 넣거나 이 줄을 지워줘.</p>
+                  )}
                 </div>
               );
             })}
 
             <button className="rv-btn-ghost rv-wide-sm" onClick={addSplit}>+ <L k="addLine" /></button>
             <p className="rv-muted rv-small">
-              합계가 총액 {U.inCurrency(originalAmount, rec.currency)} 과 맞아야 저장돼.
-              금액은 <strong>영수증에 찍힌 통화</strong> 그대로 넣어 — 달러 환산은 자동으로 돼.
-              줄을 하나만 남기고 지우면 분할이 자동으로 풀려.
+              줄들의 합이 총액 <strong>{U.inCurrency(originalAmount, rec.currency)}</strong> 과
+              맞아야 저장돼. 금액은 <strong>영수증에 찍힌 통화</strong> 그대로 —
+              달러 환산은 자동이야. 줄을 하나만 남기고 지우면 분할이 풀려.
             </p>
           </div>
         )}

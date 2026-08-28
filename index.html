@@ -284,14 +284,24 @@
   .rv-splits-head{display:flex;justify-content:space-between;align-items:baseline;
                   font-size:13px;padding-bottom:10px;margin-bottom:4px;
                   border-bottom:1px solid var(--line)}
-  .rv-split-row{padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05)}
-  .rv-split-row:last-of-type{border-bottom:none}
-  .rv-split-top{display:flex;gap:8px;align-items:center}
-  .rv-split-top .rv-input{margin-top:0}
-  .rv-split-x{background:none;border:none;color:var(--muted);padding:8px;font-size:15px}
-  .rv-split-bottom{display:flex;gap:8px;margin-top:8px}
+  /* 분할 줄 — 번호를 달고 카드로 감싼다. 예전엔 줄끼리 구분이 안 됐다. */
+  .rv-split-row{margin-top:12px;padding:12px 13px;border-radius:12px;
+                background:var(--panel);border:1px solid var(--line)}
+  .rv-split-row .rv-label:first-of-type{margin-top:6px}
+  .rv-split-empty{border-color:var(--amber)}
+  .rv-split-head{display:flex;align-items:center;gap:9px;
+                 padding-bottom:9px;border-bottom:1px solid var(--line)}
+  .rv-split-n{width:22px;height:22px;flex-shrink:0;border-radius:50%;
+              display:flex;align-items:center;justify-content:center;
+              font-size:12px;font-weight:700;color:#20180c;background:var(--tan)}
+  .rv-split-title{font-size:13px;color:var(--muted);flex:1}
+  .rv-split-x{background:none;border:1px solid var(--line);border-radius:9px;
+              color:var(--muted);padding:5px 10px;font-size:12px}
+  .rv-split-bottom{display:flex;gap:8px;margin-top:6px}
   .rv-split-bottom .rv-input{margin-top:0;flex:1}
-  .rv-split-fill{white-space:nowrap;padding:11px 12px;font-size:13px}
+  .rv-split-fill{white-space:nowrap;padding:11px 12px;font-size:13px;flex-shrink:0}
+  .rv-cur-tag{font-size:11px;color:var(--tan);border:1px solid var(--tan-dim);
+              border-radius:20px;padding:1px 7px;margin-left:5px}
   .rv-wide-sm{width:100%;margin-top:10px;padding:9px}
   .rv-splits-view{background:transparent}
   .rv-split-line{display:flex;justify-content:space-between;gap:12px;
