@@ -1841,9 +1841,10 @@ function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
   const c = window.RV_CAT(rec.category);
   const P = window.RV_KIND(ledger.kind);
   // 신고서 줄번호가 있는 장부면 줄번호를, 없으면 합계에 잡히는지를 보여준다.
-  const catLine = (cc) => (P.lineLabel
-    ? P.lineLabel + ' ' + cc.line + '번 · ' + cc.en
-    : (cc.deduct > 0 ? '' : '합계에 안 들어감 · ') + cc.en);
+  // 줄번호가 없는 분류(개인 용품 등)에 "Schedule C 번" 이 찍히면 안 된다.
+  const catLine = (cc) => (
+    (P.lineLabel && cc.line ? P.lineLabel + ' ' + cc.line + '번 · ' : '') +
+    (cc.deduct === 0 ? '공제에서 빠짐 · ' : '') + cc.en);
 
   useEffect(() => {
     let alive = true;
@@ -1881,13 +1882,20 @@ function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
         {U.isSplit(rec) ? (
           <div className="rv-splits rv-splits-view">
             <div className="rv-splits-head"><span>분류 나눔</span></div>
+            {/* 분할 금액은 영수증에 찍힌 통화 기준이다.
+                여기에 달러 기호를 붙이면 ₩6,000 이 $6,000 으로 보인다. 실제로 그랬다. */}
             {U.lines(rec).map((l, i) => (
               <div key={i} className="rv-split-line">
                 <div>
-                  <div>{l.cat.ko}</div>
+                  <div>{l.cat.ko}{l.note ? ' — ' + l.note : ''}</div>
                   <div className="rv-muted rv-small">{catLine(l.cat)}</div>
                 </div>
-                <div className="rv-num">{U.money(l.amount)}</div>
+                <div className="rv-num">
+                  {U.inCurrency(l.amount, rec.currency)}
+                  {U.isForeign(rec) && (
+                    <div className="rv-muted rv-small">{U.money(l.usd)}</div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
