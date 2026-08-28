@@ -1341,41 +1341,125 @@ function ReceiptList({ rows, loading, onOpen, onAdd, year, years, onYear, canWri
 // 정리 (화면용 리포트)
 // =================================================================
 
-function Report({ rows, year, ledger, onTaxDoc }) {
+function Report({ rows, year, ledger, onTaxDoc, onOpen }) {
   const s = useMemo(() => U.summarize(rows), [rows]);
   const P = window.RV_KIND(ledger.kind);
 
-  function Section({ title, note, items, gross }) {
+  // 보는 방식 세 가지.
+  //   line   — 신고서 줄번호 순. 세무사와 같은 순서라 기본값.
+  //   amount — 분류를 금액 큰 순으로. "어느 항목에 제일 많이 썼나"
+  //   items  — 영수증 한 장씩 큰 순으로. "어느 지출이 제일 컸나"
+  const [view, setView] = useState('line');
+
+  // 분류를 누르면 그 안에 어떤 영수증들이 있는지 펼친다.
+  const [openCat, setOpenCat] = useState(null);
+
+  // 분류별 영수증 목록. 분할된 영수증은 그 분류에 해당하는 줄만 잡힌다.
+  const byCat = useMemo(() => {
+    const m = {};
+    rows.forEach((r) => {
+      U.lines(r).forEach((l) => {
+        (m[l.category] = m[l.category] || []).push({
+          rec: r, usd: l.usd, deduct: l.deductible, note: l.note, amount: l.amount,
+        });
+      });
+    });
+    Object.keys(m).forEach((k) => m[k].sort((a, b) => b.usd - a.usd));
+    return m;
+  }, [rows]);
+
+  // 영수증 한 장씩 — 큰 지출부터
+  const bigItems = useMemo(() => rows.map((r) => ({
+    rec: r,
+    usd: U.lines(r).reduce((t, l) => t + l.usd, 0),
+    deduct: U.deductible(r),
+  })).sort((a, b) => b.usd - a.usd), [rows]);
+
+  function ReceiptRow({ rec, usd, deduct, note }) {
+    return (
+      <button className="rv-mini" onClick={() => onOpen && onOpen(rec)}>
+        <div className="rv-mini-main">
+          <div className="rv-mini-title">
+            {rec.merchant || '(가맹점 없음)'}
+            {rec.country && rec.country !== 'US' && <CountryTag code={rec.country} />}
+          </div>
+          <div className="rv-muted rv-small">
+            {U.prettyDate(rec.purchased_at)}
+            {note ? ' · ' + note : ''}
+            {U.isForeign(rec) ? ' · ' + U.inCurrency(rec.amount_original, rec.currency) : ''}
+          </div>
+        </div>
+        <div className="rv-num">
+          {U.money(usd)}
+          {Math.abs(usd - deduct) > 0.005 && (
+            <div className="rv-muted rv-small">{P.counted.ko} {U.money(deduct)}</div>
+          )}
+        </div>
+      </button>
+    );
+  }
+
+  function Section({ group, title, note, items, gross }) {
     if (items.length === 0) return null;
     // 합계에 안 잡히는 칸(수리·가구 등)은 합계도 "쓴 돈"으로 보여준다.
     // 반영액으로 보여주면 늘 0이라 무슨 뜻인지 알 수가 없다.
     // gross 칸도 달러로 더한다. e.gross 는 영수증 통화(원·엔이 섞일 수 있어) 라
     // 그대로 합치면 원화와 달러를 더하는 셈이 된다. 실제로 그 버그를 냈다.
-    const total = gross ? items.reduce((t, e) => t + e.usd, 0) : U.sum(items);
+    const val = (e) => (gross ? e.usd : e.deduct);
+    const total = items.reduce((t, e) => t + val(e), 0);
+    const shown = view === 'amount'
+      ? items.slice().sort((a, b) => val(b) - val(a))
+      : items;
+
     return (
-      <div className="rv-report-sec">
+      /* data-group 으로 칸마다 색이 갈린다 — 목록 화면의 분류 알약과 같은 색이라
+         두 화면을 오갈 때 눈이 헷갈리지 않는다. */
+      <div className="rv-report-sec" data-group={group}>
         <div className="rv-report-head">
-          <span>{title}</span>
+          <span className="rv-report-title">{title}</span>
           <strong>{U.money(total)}</strong>
         </div>
-        {note && <p className="rv-muted rv-small">{note}</p>}
+        {/* "줄번호 순으로 정렬돼 있어" 같은 설명은 그렇게 정렬돼 있을 때만 맞다 */}
+        {note && view === 'line' && <p className="rv-muted rv-small">{note}</p>}
         <table className="rv-table">
           <tbody>
-            {items.map((e) => (
-              <tr key={e.cat.key}>
-                {P.lineLabel && <td className="rv-line">{e.cat.line}</td>}
-                <td>
-                  <div>{e.cat.ko}</div>
-                  <div className="rv-muted rv-small">{e.cat.en} · {e.n}건</div>
-                </td>
-                <td className="rv-num">
-                  {U.money(e.deduct)}
-                  {Math.abs(e.deduct - e.usd) > 0.005 && (
-                    <div className="rv-muted rv-small">지출 {U.money(e.usd)}</div>
+            {shown.map((e) => {
+              const share = total > 0 ? Math.max(1, (val(e) / total) * 100) : 0;
+              const open = openCat === e.cat.key;
+              return (
+                <React.Fragment key={e.cat.key}>
+                  <tr className="rv-cat-row"
+                      onClick={() => setOpenCat(open ? null : e.cat.key)}>
+                    {P.lineLabel && <td className="rv-line">{e.cat.line}</td>}
+                    <td>
+                      <div>
+                        {e.cat.ko}
+                        <span className="rv-caret">{open ? '▾' : '▸'}</span>
+                      </div>
+                      <div className="rv-muted rv-small">{e.cat.en} · {e.n}건</div>
+                      {/* 비중 막대. 숫자를 읽기 전에 어디가 큰지 먼저 보이게. */}
+                      <div className="rv-share"><span style={{ width: share + '%' }} /></div>
+                    </td>
+                    <td className="rv-num">
+                      {U.money(val(e))}
+                      {!gross && Math.abs(e.deduct - e.usd) > 0.005 && (
+                        <div className="rv-muted rv-small">지출 {U.money(e.usd)}</div>
+                      )}
+                    </td>
+                  </tr>
+                  {open && (
+                    <tr>
+                      <td colSpan={P.lineLabel ? 3 : 2} className="rv-cat-open">
+                        {(byCat[e.cat.key] || []).map((x, i) => (
+                          <ReceiptRow key={i} rec={x.rec} usd={x.usd}
+                                      deduct={gross ? x.usd : x.deduct} note={x.note} />
+                        ))}
+                      </td>
+                    </tr>
                   )}
-                </td>
-              </tr>
-            ))}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1394,11 +1478,48 @@ function Report({ rows, year, ledger, onTaxDoc }) {
       <div className="rv-body">
         {rows.length === 0 && <div className="rv-empty"><p>이 해에는 자료가 없어.</p></div>}
 
-        {/* 어떤 칸이 몇 개 나오는지는 장부 종류가 정한다 */}
-        {P.report.sections.map((sec) => (
-          <Section key={sec.group} title={sec.title} note={sec.note}
+        {rows.length > 0 && (
+          <div className="rv-seg">
+            <button className={view === 'line' ? 'on' : ''} onClick={() => setView('line')}>
+              {P.lineLabel ? '신고서 순' : '기본 순'}
+            </button>
+            <button className={view === 'amount' ? 'on' : ''} onClick={() => setView('amount')}>
+              항목 큰 순
+            </button>
+            <button className={view === 'items' ? 'on' : ''} onClick={() => setView('items')}>
+              지출 큰 순
+            </button>
+          </div>
+        )}
+
+        {/* 영수증 한 장씩 — 어느 지출이 제일 컸나 */}
+        {view === 'items' && rows.length > 0 && (
+          <div className="rv-report-sec">
+            <div className="rv-report-head">
+              <span className="rv-report-title">큰 지출부터</span>
+              <strong>{bigItems.length}건</strong>
+            </div>
+            <p className="rv-muted rv-small">
+              영수증 한 장씩, 쓴 돈이 큰 순서야. 눌러서 그 영수증을 열 수 있어.
+            </p>
+            {bigItems.map((x, i) => (
+              <ReceiptRow key={i} rec={x.rec} usd={x.usd} deduct={x.deduct}
+                          note={window.RV_CAT(x.rec.category).ko} />
+            ))}
+          </div>
+        )}
+
+        {/* 분류별 — 어떤 칸이 몇 개 나오는지는 장부 종류가 정한다 */}
+        {view !== 'items' && P.report.sections.map((sec) => (
+          <Section key={sec.group} group={sec.group} title={sec.title} note={sec.note}
                    gross={!!sec.gross} items={s.group(sec.group)} />
         ))}
+
+        {view !== 'items' && rows.length > 0 && (
+          <p className="rv-muted rv-small">
+            분류를 누르면 그 안에 어떤 영수증이 있는지 큰 순서로 펼쳐져.
+          </p>
+        )}
 
         {rows.length > 0 && (
           <p className="rv-muted rv-small rv-foot">{P.report.foot}</p>
@@ -2431,7 +2552,9 @@ function App() {
       )}
 
       {tab === 'report' && (
-        <Report rows={rows} year={year} ledger={ledger} onTaxDoc={() => setMode('tax')} />
+        <Report rows={rows} year={year} ledger={ledger}
+                onTaxDoc={() => setMode('tax')}
+                onOpen={(r) => { setCurrent(r); setMode('detail'); }} />
       )}
 
       {tab === 'settings' && (
