@@ -58,7 +58,11 @@ function CategoryPill({ catKey }) {
   return (
     <span className={'rv-pill rv-pill-' + c.group}
           title={c.en + (c.line ? ' · line ' + c.line : '')}>
-      {c.ko}
+      <span className="rv-pill-ko">{c.ko}</span>
+      {/* 세무사 자료에 실제로 찍히는 이름. 화면에서 미리 눈에 익어야
+          나중에 문서를 봤을 때 "이게 그거였구나" 가 된다.
+          자리가 모자라면 이쪽이 먼저 줄어든다. */}
+      <span className="rv-pill-en">{c.en}</span>
     </span>
   );
 }
@@ -75,7 +79,9 @@ function CategorySelect({ value, onChange, ledger }) {
         if (!items.length) return null;
         return (
           <optgroup key={sec.group} label={sec.pick || sec.title}>
-            {items.map((c) => <option key={c.key} value={c.key}>{c.ko}</option>)}
+            {items.map((c) => (
+            <option key={c.key} value={c.key}>{c.ko} · {c.en}</option>
+          ))}
           </optgroup>
         );
       })}
@@ -1164,7 +1170,9 @@ function Report({ rows, year, ledger, onTaxDoc }) {
     if (items.length === 0) return null;
     // 합계에 안 잡히는 칸(수리·가구 등)은 합계도 "쓴 돈"으로 보여준다.
     // 반영액으로 보여주면 늘 0이라 무슨 뜻인지 알 수가 없다.
-    const total = gross ? items.reduce((t, e) => t + e.gross, 0) : U.sum(items);
+    // gross 칸도 달러로 더한다. e.gross 는 영수증 통화(원·엔이 섞일 수 있어) 라
+    // 그대로 합치면 원화와 달러를 더하는 셈이 된다. 실제로 그 버그를 냈다.
+    const total = gross ? items.reduce((t, e) => t + e.usd, 0) : U.sum(items);
     return (
       <div className="rv-report-sec">
         <div className="rv-report-head">
@@ -1183,8 +1191,8 @@ function Report({ rows, year, ledger, onTaxDoc }) {
                 </td>
                 <td className="rv-num">
                   {U.money(e.deduct)}
-                  {Math.abs(e.deduct - e.gross) > 0.005 && (
-                    <div className="rv-muted rv-small">지출 {U.money(e.gross)}</div>
+                  {Math.abs(e.deduct - e.usd) > 0.005 && (
+                    <div className="rv-muted rv-small">지출 {U.money(e.usd)}</div>
                   )}
                 </td>
               </tr>
@@ -1235,7 +1243,7 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
   // 각 칸의 합계. gross 인 칸은 "쓴 돈", 아니면 "인정되는 금액".
   const sectionTotal = (sec) => {
     const items = s.group(sec.group);
-    return sec.gross ? items.reduce((t, e) => t + e.gross, 0) : U.sum(items);
+    return sec.gross ? items.reduce((t, e) => t + e.usd, 0) : U.sum(items);
   };
   // 문서 맨 아래 총계는 gross 칸을 빼고 더한다 (공제액에 수리비를 더하면 안 되니까)
   const grandTotal = D.sections
@@ -1383,7 +1391,7 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
         {P.lineLabel && <td className="tx-line">{e.cat.line}</td>}
         <td>{e.cat.en}</td>
         <td className="tx-num">{e.n}</td>
-        <td className="tx-num">{U.plain(gross ? e.gross : e.deduct)}</td>
+        <td className="tx-num">{U.plain(gross ? e.usd : e.deduct)}</td>
       </tr>
     ));
   }
@@ -1411,6 +1419,14 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
           <li key={key}><strong>Incomplete:</strong> vehicle costs (line 9) are receipt-based only.
               No mileage log is kept in this system.</li>
         ) : null;
+      case 'excluded': {
+        const ex = s.group('excluded');
+        if (!ex.length) return null;
+        const n = ex.reduce((t, e) => t + e.n, 0);
+        return <li key={key}>{n} line item{n > 1 ? 's were' : ' was'} identified as personal and
+            <strong> excluded from the deduction</strong>. The receipts are recorded at their full
+            amounts so they reconcile to the card statement; only the business portion is claimed.</li>;
+      }
       case 'notTrackedBusiness':
         return <li key={key}><strong>Not tracked here:</strong> beginning and ending inventory
             (Schedule C Part III), home-office expenses, and any non-receipt items such as

@@ -101,14 +101,23 @@
   .rv-item-amt{font-variant-numeric:tabular-nums;font-size:15px;white-space:nowrap}
   .rv-clip{opacity:.6}
   .rv-empty{text-align:center;color:var(--muted);padding:60px 20px}
-  .rv-pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;
-           border:1px solid var(--line)}
+  .rv-pill{display:inline-flex;align-items:baseline;gap:5px;overflow:hidden;
+           padding:2px 8px;border-radius:20px;font-size:11px;
+           border:1px solid var(--line);max-width:100%;min-width:0}
+  /* 한글은 줄바꿈 없이 통째로. 영문은 작게 옆에 붙고 자리가 모자라면 이쪽이 먼저 줄어든다 —
+     화면에서 먼저 읽는 건 한글이니까. */
+  .rv-pill-ko{white-space:nowrap}
+  .rv-pill-en{font-size:9.5px;opacity:.62;white-space:nowrap;
+              overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .rv-item-sub{min-width:0}
   .rv-pill-cogs{background:#22301f;border-color:#3b5535;color:#b9d6ac}
   .rv-pill-expense{background:#2a2620;border-color:#463d31;color:#d9c6a6}
   /* 합계에 잡히는 것 / 안 잡히는 것 — 목록에서 한눈에 갈리게 */
   .rv-pill-basis{background:#22301f;border-color:#3b5535;color:#b9d6ac}
   .rv-pill-nonbasis{background:#2b2523;border-color:#4a3b36;color:#c9b4ad}
   .rv-pill-personal{background:#232a30;border-color:#3a4653;color:#b7c6d6}
+  /* 공제에서 뺀 개인 품목 — 목록에서 바로 구분되게 흐리고 다른 색으로 */
+  .rv-pill-excluded{background:#2b2523;border-color:#4a3b36;color:#c9b4ad}
 
   /* ---------- 영문/한글 병기 라벨 ---------- */
   /* 영문이 본문, 한글은 옆에 작게. 세무사와 화면을 같이 봐도 말이 통하게. */

@@ -115,6 +115,19 @@ var LEATHER = [
   { key: 'other', group: 'expense', line: '27a',
     ko: '기타', en: 'Other expenses', deduct: 1,
     hint: '어디에도 안 맞으면 여기. 메모에 무엇인지 꼭 적어둘 것' },
+
+  // ---------- 공제에서 빼는 것 ----------
+  //
+  // 한 영수증에 사업용과 개인용이 섞이는 일은 흔하다 (다이소에서 공구와 세면용품을
+  // 같이 사는 식). 그때 영수증을 고치거나 개인 품목을 빼고 적으면 안 된다 —
+  // 총액이 카드 명세서와 안 맞고, 증빙에 손댄 게 된다.
+  //
+  // 대신 영수증은 전액 그대로 넣고, 개인 품목만 이 분류로 갈라둔다.
+  // deduct 0 이라 공제 계산에는 안 들어가고, 기록에는 남는다.
+  // 세무사 문서에도 "뺐다"는 사실이 따로 적힌다 — 그게 오히려 깔끔한 기록이다.
+  { key: 'personal_excl', group: 'excluded', line: '', ord: 99, deduct: 0,
+    ko: '개인 용품 (공제 제외)', en: 'Personal — not deductible',
+    hint: '사업과 무관한 품목. 영수증은 전액 그대로 두고 이 줄로 갈라내면 공제에서만 빠져' },
 ];
 
 // ---------------------------------------------------------------
@@ -231,6 +244,9 @@ window.RV_PROFILES = {
         { group: 'expense', title: '경비 (Schedule C Part II)',
           pick: '경비',
           note: '신고서와 같은 줄번호 순서로 정렬돼 있어.' },
+        { group: 'excluded', title: '공제에서 뺀 것', gross: true,
+          pick: '공제에서 빼기 — 개인 용품',
+          note: '한 영수증에 섞여 있던 개인 품목. 금액은 기록되지만 공제에는 안 들어가.' },
       ],
       foot: '표시된 금액은 사업 사용 비율과 식비 50% 규칙을 반영한 공제 반영액이야. 실제 지출액이 다르면 아래에 함께 표시돼. 신고 전에는 회계사와 한 번 맞춰보는 걸 권해 — 나는 세무 자문을 할 수 있는 입장이 아니야.',
     },
@@ -243,10 +259,13 @@ window.RV_PROFILES = {
       sections: [
         { group: 'cogs', h2: 'Part III — Cost of Goods Sold', total: 'Total cost of goods sold' },
         { group: 'expense', h2: 'Part II — Expenses', total: 'Total expenses' },
+        { group: 'excluded', h2: 'Excluded — personal items (not claimed)',
+          gross: true, total: 'Total excluded' },
       ],
       grand: 'Total deductible, all categories',
       cumulative: false,
-      notes: ['deductibleAmounts', 'meals', 'mixedUse', 'equipment', 'car', 'notTrackedBusiness'],
+      notes: ['deductibleAmounts', 'excluded', 'meals', 'mixedUse', 'equipment', 'car',
+              'notTrackedBusiness'],
       reviewedBy: 'taxpayer', reviewedBefore: 'filing',
     },
 

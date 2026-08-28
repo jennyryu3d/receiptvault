@@ -176,9 +176,12 @@
       var by = new Map();
       rows.forEach(function (r) {
         RV_UTIL.lines(r).forEach(function (l) {
-          if (!by.has(l.category)) by.set(l.category, { cat: l.cat, gross: 0, deduct: 0, n: 0 });
+          if (!by.has(l.category)) {
+            by.set(l.category, { cat: l.cat, gross: 0, usd: 0, deduct: 0, n: 0 });
+          }
           var e = by.get(l.category);
-          e.gross += l.amount;
+          e.gross += l.amount;   // 영수증에 찍힌 통화 기준 (섞여 있을 수 있어 화면에 그냥 쓰면 안 된다)
+          e.usd += l.usd;        // 달러 환산 — 표와 문서는 전부 이걸 쓴다
           e.deduct += l.deductible;
           e.n += 1;
         });
