@@ -587,16 +587,56 @@
     // 로그인한 사람만 인식을 부를 수 있다. 토큰을 같이 보내면 Worker 가
     // 그 토큰으로 사용량 한도를 확인하고 기록한다. 주소만 알아낸 외부인은
     // 토큰이 없어서 아무것도 못 한다 — API 요금이 새지 않게 하는 핵심 장치다.
+    // 마지막 인식 시도가 어디서 어떻게 끝났는지 남긴다.
+    //
+    // 태블릿·폰에는 개발자 도구가 없어서 "아무 일도 안 일어나"를 눈으로 볼 방법이 없다.
+    // 그래서 단계마다 기록해 두고 설정 → 연결 상태에서 읽는다.
+    trace: function (stage, extra) {
+      var t = Object.assign({ at: new Date().toISOString(), stage: stage }, extra || {});
+      RV_AI.last = t;
+      try { localStorage.setItem('rv_ai_last', JSON.stringify(t)); } catch (e) {}
+      return t;
+    },
+
+    lastTrace: function () {
+      if (RV_AI.last) return RV_AI.last;
+      try { return JSON.parse(localStorage.getItem('rv_ai_last') || 'null'); }
+      catch (e) { return null; }
+    },
+
     extract: async function (blob, ledgerId, ledger) {
-      if (!CFG.AI_PROXY_URL) throw new Error('AI 인식이 아직 연결되지 않았어요.');
+      RV_AI.trace('시작', { size: blob && blob.size });
+      if (!CFG.AI_PROXY_URL) {
+        RV_AI.trace('주소 없음');
+        throw new Error('AI 인식이 아직 연결되지 않았어요.');
+      }
+      // 파일이 섞여 올라간 경우를 여기서 잡는다 — 예전 app.jsx + 새 categories.js 처럼.
+      if (typeof window.RV_KIND !== 'function' || typeof window.RV_CATS !== 'function') {
+        RV_AI.trace('파일 불일치');
+        throw new Error('앱 파일 버전이 섞였어. 설정에서 ⟳(강제 갱신)을 눌러줘.');
+      }
 
       var session = await window.RV_DB.getSession();
-      if (!session) throw new Error('로그인이 필요해요.');
+      if (!session) {
+        RV_AI.trace('로그인 없음');
+        throw new Error('로그인이 필요해요.');
+      }
 
       var dataUrl = await RV_UTIL.blobToDataUrl(blob);
       var base64 = dataUrl.split(',')[1];
+      RV_AI.trace('보내는 중', { kb: Math.round(base64.length / 1024) });
 
-      var resp = await fetch(CFG.AI_PROXY_URL, {
+      // 응답이 영영 안 오는 경우를 막는다. 그냥 두면 "읽는 중..." 에서 멈춘 채 끝난다.
+      var ctl = null, timer = null;
+      try {
+        ctl = new AbortController();
+        timer = setTimeout(function () { ctl.abort(); }, 70000);
+      } catch (e) {}
+
+      var resp;
+      try {
+        resp = await fetch(CFG.AI_PROXY_URL, {
+        signal: ctl ? ctl.signal : undefined,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -617,9 +657,20 @@
           }).join(', '),
           today: RV_UTIL.today(),
         }),
-      });
+        });
+      } catch (netEx) {
+        RV_AI.trace('연결 실패', { error: String(netEx && netEx.message || netEx) });
+        throw new Error(
+          (netEx && netEx.name === 'AbortError')
+            ? '인식이 70초를 넘겨서 멈췄어. 사진을 다시 찍거나 항목을 직접 넣어줘.'
+            : '인식 서버에 연결하지 못했어 (' + (netEx && netEx.message) + ')'
+        );
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
 
       var body = await resp.json().catch(function () { return null; });
+      RV_AI.trace('응답 받음', { status: resp.status, ok: resp.ok });
 
       if (!resp.ok) {
         // 한도 초과는 "오류" 라기보다 알려줘야 할 상태라 문구를 따로 만든다.
@@ -633,8 +684,17 @@
           }
         }
         var msg = body ? JSON.stringify(body) : '';
+        RV_AI.trace('서버 오류', { status: resp.status, detail: msg.slice(0, 150) });
         throw new Error('인식 실패 (' + resp.status + ') ' + msg.slice(0, 200));
       }
+      if (!body || typeof body !== 'object') {
+        RV_AI.trace('응답 이상', { body: String(body).slice(0, 100) });
+        throw new Error('인식 결과를 읽지 못했어. 다시 시도해줘.');
+      }
+      RV_AI.trace('성공', {
+        merchant: body.merchant || '(없음)',
+        amount: body.amount == null ? '(없음)' : body.amount,
+      });
       return body;
     },
   };
@@ -731,6 +791,30 @@
       out.push({
         k: 'Files updated',
         v: d ? d.toLocaleString() : '확인 불가',
+      });
+
+      // 파일이 섞여 올라갔는지. 하나라도 없으면 예전 파일이 남아 있는 것이다.
+      var missing = [];
+      ['RV_KIND', 'RV_CATS', 'RV_PROFILES', 'RV_T'].forEach(function (k) {
+        if (!window[k]) missing.push(k);
+      });
+      out.push({
+        k: 'Files match',
+        v: missing.length ? '섞였어 — ⟳ 눌러줘 (' + missing.join(', ') + ')' : '정상',
+        bad: missing.length > 0,
+      });
+
+      // 마지막 자동 인식이 어디까지 갔는지. "아무 일도 안 일어나"를 여기서 읽는다.
+      var t = window.RV_AI && window.RV_AI.lastTrace && window.RV_AI.lastTrace();
+      out.push({
+        k: 'Last AI read',
+        v: t ? (String(t.at).slice(5, 16).replace('T', ' ') + ' · ' + t.stage +
+                (t.status ? ' (' + t.status + ')' : '') +
+                (t.error ? ' — ' + String(t.error).slice(0, 60) : '') +
+                (t.detail ? ' — ' + String(t.detail).slice(0, 60) : '') +
+                (t.merchant ? ' — ' + t.merchant : ''))
+              : '아직 없음',
+        bad: !!(t && (t.error || t.detail || /실패|없음|이상|불일치/.test(t.stage))),
       });
       return out;
     },

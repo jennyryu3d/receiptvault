@@ -503,13 +503,31 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     if (!file) return;
 
     setErr(''); setBusy('이미지 정리하는 중...');
+
+    // 사진 준비와 AI 인식을 분리한다.
+    // 예전에는 한 덩어리라서 인식이 실패하면 사진까지 같이 날아갔다 —
+    // 사진은 증빙이라 인식이 안 되더라도 반드시 남아야 한다.
+    let small;
     try {
-      const small = await U.compressImage(file);
+      small = await U.compressImage(file);
       setBlob(small);
       setPreview(URL.createObjectURL(small));
       set('source', source);
+    } catch (ex) {
+      AI.trace('사진 처리 실패', { error: String(ex && ex.message || ex) });
+      setBusy('');
+      setErr('사진을 읽지 못했어 (' + (ex && ex.message) + '). 다시 찍어볼래?');
+      return;
+    }
 
-      if (AI.available()) {
+    if (!AI.available()) {
+      setBusy('');
+      setErr('자동 인식이 연결돼 있지 않아. 사진은 저장되니 항목만 직접 넣어줘.');
+      return;
+    }
+
+    try {
+      {
         setBusy('영수증 읽는 중...');
         const got = await AI.extract(small, ledgerId, ledger);
 
@@ -554,7 +572,10 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
         }));
       }
     } catch (ex) {
-      setErr((ex.message || '이미지 처리에 실패했어요.') + ' 항목은 직접 채워도 저장돼.');
+      // 사진은 이미 붙어 있다. 인식만 실패한 것이니 그렇게 말한다.
+      setErr('자동 인식 실패: ' + (ex.message || '알 수 없는 오류') +
+             ' — 사진은 그대로 있어. 항목만 직접 넣고 저장하면 돼. ' +
+             '(설정 → 연결 상태에 자세한 내용이 남아 있어)');
     } finally {
       setBusy('');
     }
@@ -1984,6 +2005,28 @@ function App() {
             <code>config.js</code> 에 Supabase 주소와 anon key를 아직 안 넣었어.
             그 두 값을 채우고 새로고침하면 로그인 화면이 나와.
           </Banner>
+        </div>
+      </div>
+    );
+  }
+
+  // 파일이 섞여 올라간 경우. 예전 app.jsx + 새 categories.js 같은 조합이면
+  // 화면이 통째로 안 뜨거나 자동 인식만 조용히 죽는다. 그럴 때 원인을 말해준다.
+  const missing = ['RV_KIND', 'RV_CATS', 'RV_PROFILES', 'RV_T', 'RV_CAT']
+    .filter((k) => !window[k]);
+  if (missing.length) {
+    return (
+      <div className="rv-center">
+        <div className="rv-card">
+          <div className="rv-logo">파일이 섞였어</div>
+          <p className="rv-muted rv-small">
+            앱 파일 일부가 예전 것이라 서로 못 알아보는 상태야.
+            아래 버튼을 누르면 전부 새로 받아와. 저장한 영수증은 그대로 있어.
+          </p>
+          <p className="rv-muted rv-small">없는 것: {missing.join(', ')}</p>
+          <button className="rv-btn" onClick={() => window.RV_APP.hardRefresh()}>
+            전부 새로 받기
+          </button>
         </div>
       </div>
     );
