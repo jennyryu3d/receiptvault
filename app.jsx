@@ -357,20 +357,88 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
   const ledgerId = ledger.id;
   const P = window.RV_KIND(ledger.kind);      // 장부 종류가 화면을 정한다
   const F = P.form;
-  const [rec, setRec] = useState(() => Object.assign(
-    {}, BLANK,
-    // 장부마다 분류표가 다르니 처음 골라져 있는 값도 달라야 한다
-    { category: window.RV_FIRST_CAT(ledger.kind, ledger.cat_set) },
-    initial || {}
-  ));
+  const editing = !!(initial && initial.id);
+
+  // ---- 초안 보관 ----
+  //
+  // 안드로이드에서 카메라 앱이 뜨면 크롬이 메모리를 비우려고 이 화면을 통째로
+  // 끝내버릴 때가 있다. 사진을 찍고 돌아오면 앱이 새로 뜨고, 쓰던 내용도
+  // 방금 찍은 사진도 사라진다. 실제로 이 일이 났다 — "아무 일도 안 일어나"의 정체다.
+  //
+  // 그래서 입력 중인 내용을 계속 저장해 두고, 다시 뜨면 이어서 쓰게 한다.
+  // (사진 자체는 브라우저가 들고 있던 것이라 되살릴 수 없다. 그건 아래 안내로 처리.)
+  const DRAFT_KEY = 'rv_draft_' + ledger.id;
+  const CAM_KEY = 'rv_camera_at';
+
+  const [rec, setRec] = useState(() => {
+    const base = Object.assign(
+      {}, BLANK,
+      // 장부마다 분류표가 다르니 처음 골라져 있는 값도 달라야 한다
+      { category: window.RV_FIRST_CAT(ledger.kind, ledger.cat_set) },
+      initial || {}
+    );
+    if (initial) return base;                    // 수정 중이면 초안을 끼얹지 않는다
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return base;
+      const d = JSON.parse(raw);
+      // 하루 지난 초안은 버린다. 오래된 걸 되살리면 오히려 헷갈린다.
+      if (!d || !d.at || Date.now() - d.at > 86400000) return base;
+      return Object.assign(base, d.rec || {});
+    } catch (e) { return base; }
+  });
+
+  // 초안에서 되살아난 화면인지 (되살아났다면 그렇다고 말해줘야 한다)
+  const [restored, setRestored] = useState(() => {
+    if (initial) return false;
+    try {
+      const raw = localStorage.getItem('rv_draft_' + ledger.id);
+      if (!raw) return false;
+      const d = JSON.parse(raw);
+      if (!d || !d.at || Date.now() - d.at > 86400000) return false;
+      const r = d.rec || {};
+      // 뭔가 실제로 입력돼 있을 때만 "이어서 쓰는 중"이라고 한다
+      return !!(r.merchant || r.amount_original || r.notes ||
+                (r.splits && r.splits.length));
+    } catch (e) { return false; }
+  });
+
   const [blob, setBlob] = useState(null);        // 새로 고른 이미지
   const [preview, setPreview] = useState(null);  // 화면에 보여줄 URL
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
+  // 카메라에서 돌아오는 사이 앱이 다시 시작됐을 때 보여줄 안내
+  const [cameraLost, setCameraLost] = useState(false);
   const fileRef = useRef(null);
   const cameraRef = useRef(null);
 
-  const editing = !!(initial && initial.id);
+  // 입력 중인 내용을 계속 저장해 둔다 (사진은 뺀다)
+  useEffect(() => {
+    if (editing) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ at: Date.now(), rec: rec }));
+    } catch (e) {}
+  }, [rec, editing, DRAFT_KEY]);
+
+  // 화면이 새로 떴는데 조금 전에 카메라를 열었던 흔적이 있으면,
+  // 사진을 찍고 오는 사이 앱이 종료된 것이다.
+  useEffect(() => {
+    try {
+      const at = Number(localStorage.getItem(CAM_KEY) || 0);
+      if (at && Date.now() - at < 300000) setCameraLost(true);
+      localStorage.removeItem(CAM_KEY);
+    } catch (e) {}
+  }, []);
+
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+  }
+
+  // 카메라를 열기 직전에 흔적을 남긴다
+  function openCamera() {
+    try { localStorage.setItem(CAM_KEY, String(Date.now())); } catch (e) {}
+    cameraRef.current.click();
+  }
 
   useEffect(() => {
     let alive = true;
@@ -503,6 +571,8 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     if (!file) return;
 
     setErr(''); setBusy('이미지 정리하는 중...');
+    setCameraLost(false);
+    try { localStorage.removeItem(CAM_KEY); } catch (ex2) {}
 
     // 사진 준비와 AI 인식을 분리한다.
     // 예전에는 한 덩어리라서 인식이 실패하면 사진까지 같이 날아갔다 —
@@ -526,51 +596,67 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
       return;
     }
 
+    // 이미 AI가 읽어놓은 내용이 있으면 다시 부르지 않는다.
+    // (앱이 한 번 죽었다 살아난 뒤 사진만 다시 붙이는 경우가 이렇다.
+    //  그때 또 부르면 하루 한도만 축난다.)
+    if (rec.ai_raw) {
+      setBusy('');
+      setErr('사진을 붙였어. 이미 읽어둔 내용이 있어서 인식은 건너뛰었어 — ' +
+             '다시 읽히려면 아래 "다시 인식" 을 눌러줘.');
+      return;
+    }
+
+    await runExtract(small, source);
+  }
+
+  // 사진 한 장을 AI에게 읽히고 결과를 화면에 채운다.
+  // 사진 고르기와 분리해 둔 이유: 앱이 한 번 죽었다 살아난 뒤
+  // 같은 사진으로 "다시 인식" 만 하고 싶을 때가 있다.
+  async function runExtract(small, source) {
+    setErr(''); setBusy('영수증 읽는 중...');
     try {
-      {
-        setBusy('영수증 읽는 중...');
-        const got = await AI.extract(small, ledgerId, ledger);
+      const got = await AI.extract(small, ledgerId, ledger);
 
-        // AI가 제안한 분할은 그대로 믿지 않는다.
-        // 분류 key 가 실제로 있고, 합계가 총액과 맞을 때만 받아들인다.
-        let aiSplits = [];
-        if (Array.isArray(got.splits) && got.splits.length > 1 && got.total != null) {
-          const clean = got.splits.filter((s) => s && window.RV_CAT_BY_KEY[s.category] && Number(s.amount) > 0);
-          if (clean.length > 1 && U.splitRemainder(got.total, clean) === 0) {
-            aiSplits = clean.map((s) => ({
-              category: s.category,
-              amount: String(Number(s.amount).toFixed(2)),
-              note: s.note || '',
-            }));
-          }
+      // AI가 제안한 분할은 그대로 믿지 않는다.
+      // 분류 key 가 실제로 있고, 합계가 총액과 맞을 때만 받아들인다.
+      let aiSplits = [];
+      if (Array.isArray(got.splits) && got.splits.length > 1 && got.amount != null) {
+        const clean = got.splits.filter(
+          (x) => x && window.RV_CAT_BY_KEY[x.category] && Number(x.amount) > 0);
+        if (clean.length > 1 && U.splitRemainder(got.amount, clean) === 0) {
+          aiSplits = clean.map((x) => ({
+            category: x.category,
+            amount: String(Number(x.amount).toFixed(2)),
+            note: x.note || '',
+          }));
         }
-
-        const cur = (window.RV_CURRENCIES || []).includes(got.currency) ? got.currency : null;
-        const ctry = window.RV_COUNTRIES.some((c) => c.code === got.country) ? got.country : null;
-
-        setRec((r) => Object.assign({}, r, {
-          splits: aiSplits,
-          purchased_at: got.purchased_at || r.purchased_at,
-          merchant: got.merchant || r.merchant,
-          merchant_en: got.merchant_en || r.merchant_en || '',
-          notes_en: got.notes_en || r.notes_en || '',
-          notes: r.notes || got.notes_en || '',
-          country: ctry || r.country,
-          currency: cur || r.currency,
-          // 통화가 바뀌었으니 환율은 다시 받아오게 표시해 둔다
-          fx_source: cur && cur !== 'USD' ? 'ecb' : 'same',
-          amount_original: got.amount != null ? String(got.amount) : r.amount_original,
-          tax: got.tax != null ? String(got.tax) : r.tax,
-          payment_method: got.payment_method || r.payment_method,
-          // 어느 카드였는지. 명세서와 대조할 때 쓰는 값이라 자동으로 채우고,
-          // 틀리면 손으로 고칠 수 있게 그냥 글자로 둔다.
-          payment_ref: U.cleanPaymentRef(got.payment_ref) || r.payment_ref || '',
-          category: got.category && window.RV_CAT_BY_KEY[got.category] ? got.category : r.category,
-          ai_raw: got,
-          needs_review: true,
-          source: source,
-        }));
       }
+
+      const cur = (window.RV_CURRENCIES || []).includes(got.currency) ? got.currency : null;
+      const ctry = window.RV_COUNTRIES.some((c) => c.code === got.country) ? got.country : null;
+
+      setRec((r) => Object.assign({}, r, {
+        splits: aiSplits,
+        purchased_at: got.purchased_at || r.purchased_at,
+        merchant: got.merchant || r.merchant,
+        merchant_en: got.merchant_en || r.merchant_en || '',
+        notes_en: got.notes_en || r.notes_en || '',
+        notes: r.notes || got.notes_en || '',
+        country: ctry || r.country,
+        currency: cur || r.currency,
+        // 통화가 바뀌었으니 환율은 다시 받아오게 표시해 둔다
+        fx_source: cur && cur !== 'USD' ? 'ecb' : 'same',
+        amount_original: got.amount != null ? String(got.amount) : r.amount_original,
+        tax: got.tax != null ? String(got.tax) : r.tax,
+        payment_method: got.payment_method || r.payment_method,
+        // 어느 카드였는지. 명세서와 대조할 때 쓰는 값이라 자동으로 채우고,
+        // 틀리면 손으로 고칠 수 있게 그냥 글자로 둔다.
+        payment_ref: U.cleanPaymentRef(got.payment_ref) || r.payment_ref || '',
+        category: got.category && window.RV_CAT_BY_KEY[got.category] ? got.category : r.category,
+        ai_raw: got,
+        needs_review: true,
+        source: source || r.source,
+      }));
     } catch (ex) {
       // 사진은 이미 붙어 있다. 인식만 실패한 것이니 그렇게 말한다.
       setErr('자동 인식 실패: ' + (ex.message || '알 수 없는 오류') +
@@ -579,6 +665,12 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     } finally {
       setBusy('');
     }
+  }
+
+  function redoExtract() {
+    if (!blob) return;
+    setRec((r) => Object.assign({}, r, { ai_raw: null }));
+    runExtract(blob, rec.source);
   }
 
   async function save() {
@@ -611,6 +703,7 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
         } catch (imgEx) {
           // 영수증 자체는 이미 저장됐다. 사진만 실패한 걸로 전체를 되돌리면
           // 방금 입력한 내용을 다시 치게 만드는 셈이라 더 나쁘다.
+          clearDraft();
           setBusy('');
           setErr('영수증은 저장됐는데 사진만 못 올렸어: ' +
                  (imgEx.message || '알 수 없는 오류') +
@@ -618,6 +711,7 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
           return;
         }
       }
+      clearDraft();
       onDone();
     } catch (ex) {
       setErr(ex.message || '저장하지 못했어요.');
@@ -666,6 +760,30 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
       )}
 
       <div className="rv-body">
+        {/* 카메라에 다녀오는 사이 앱이 다시 시작된 경우.
+            사진은 이미 폰 갤러리에 저장돼 있으니 그쪽으로 안내한다. */}
+        {cameraLost && !preview && (
+          <Banner kind="warn" onClose={() => setCameraLost(false)}>
+            사진을 찍고 돌아오는 사이 앱이 다시 시작됐어. 안드로이드가 카메라를 띄우면서
+            앱을 잠깐 종료해버린 거야 — 사진은 <strong>폰 갤러리에 그대로 저장돼 있어.</strong>
+            위의 <strong>🖼 스크린샷 · 갤러리</strong>로 방금 찍은 사진을 골라줘. 그게 더 확실해.
+            {' '}쓰던 내용은 그대로 남아 있어.
+          </Banner>
+        )}
+
+        {restored && (
+          <Banner kind="info" onClose={() => setRestored(false)}>
+            쓰다 만 내용을 이어서 불러왔어.
+            {' '}
+            <button className="rv-linkbtn" onClick={() => {
+              clearDraft();
+              setRestored(false);
+              setRec(Object.assign({}, BLANK,
+                { category: window.RV_FIRST_CAT(ledger.kind, ledger.cat_set) }));
+            }}>새로 시작</button>
+          </Banner>
+        )}
+
         {rec.needs_review && (
           <Banner kind="warn">
             AI가 채운 값이야. 금액과 날짜만 눈으로 확인하고 저장해줘.
@@ -673,7 +791,7 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
         )}
 
         <div className="rv-photo-row">
-          <button className="rv-btn-ghost rv-grow" onClick={() => cameraRef.current.click()}>
+          <button className="rv-btn-ghost rv-grow" onClick={openCamera}>
             📷 <L k="takePhoto" />
           </button>
           <button className="rv-btn-ghost rv-grow" onClick={() => fileRef.current.click()}>
@@ -684,6 +802,16 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
                hidden onChange={(e) => pickImage(e, 'photo')} />
         <input ref={fileRef} type="file" accept="image/*"
                hidden onChange={(e) => pickImage(e, 'screenshot')} />
+        {rec.ai_raw && (
+          <button className="rv-btn-ghost rv-wide-sm" disabled={!!busy}
+                  onClick={() => { if (blob) redoExtract(); else fileRef.current.click(); }}>
+            🔄 다시 인식
+          </button>
+        )}
+        <p className="rv-muted rv-small">
+          촬영 후 화면이 처음으로 돌아가면 폰이 앱을 잠깐 껐던 거야.
+          그럴 땐 <strong>갤러리</strong>로 방금 찍은 사진을 고르면 돼 — 쓰던 내용은 남아 있어.
+        </p>
 
         {!AI.available() && (
           <p className="rv-muted rv-small">
