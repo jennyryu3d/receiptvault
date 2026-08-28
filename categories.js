@@ -220,6 +220,10 @@ window.RV_PROFILES = {
     ai: 'business',                     // Worker 가 쓰는 설명문 종류
     lineLabel: 'Schedule C',            // 줄번호 표기. null 이면 줄번호 없음
     counted: { en: 'Deductible', ko: '공제 반영액' },
+    // "금액 하나만 빼기" 를 눌렀을 때 그 금액이 들어갈 분류
+    exclude: { cat: 'personal_excl', button: '개인 지출 빼기',
+               title: '개인 지출 빼기',
+               help: '영수증에 섞인 개인 품목의 가격을 그대로 넣어. 영수증 총액은 손대지 않고 공제에서만 빠져.' },
 
     form: {
       businessPct: true,                // 사업 사용 비율 칸을 쓰나
@@ -282,6 +286,9 @@ window.RV_PROFILES = {
     ai: 'property',
     lineLabel: null,
     counted: { en: 'Added to basis', ko: '취득원가 반영액' },
+    exclude: { cat: 'p_other', button: '집값에 안 넣을 금액 빼기',
+               title: '취득원가에서 빼기',
+               help: '이번 공사와 무관하거나 성격이 애매한 품목의 가격을 넣어. 총액은 그대로 두고 취득원가 합계에서만 빠져.' },
 
     form: {
       businessPct: false,

@@ -79,9 +79,9 @@ function CategorySelect({ value, onChange, ledger }) {
         if (!items.length) return null;
         return (
           <optgroup key={sec.group} label={sec.pick || sec.title}>
-            {items.map((c) => (
-            <option key={c.key} value={c.key}>{c.ko} · {c.en}</option>
-          ))}
+            {/* 목록 안에서는 한글만. 영문까지 넣으면 줄이 길어져 폰에서 두 줄씩 접히고
+              무엇을 고르는지가 더 안 보인다. 영문은 고른 뒤 아래 줄에 나온다. */}
+          {items.map((c) => <option key={c.key} value={c.key}>{c.ko}</option>)}
           </optgroup>
         );
       })}
@@ -154,23 +154,40 @@ function SignIn() {
 //   넣어버린다. 그건 나중에 세무사 자료가 틀리는 사고다.
 //   그리고 장부를 오가는 건 설정이 아니라 일상 동작이다.
 
-function LedgerBar({ ledger, ledgers, stamp, onOpen }) {
+function LedgerBar({ ledger, ledgers, stamp, refreshing, onOpen, onRefresh }) {
   const K = window.RV_KIND(ledger.kind);
+  // 막대 전체를 버튼으로 두면 안에 새로고침 버튼을 넣을 수 없다(버튼 안의 버튼).
+  // 그래서 왼쪽 넓은 부분만 버튼으로 두고 ⟳ 는 따로 세운다.
   return (
-    <button className="rv-ledgerbar" onClick={onOpen}>
-      <span className="rv-ledgerbar-icon">{K.icon}</span>
-      <span className="rv-ledgerbar-mid">
-        <span className="rv-ledgerbar-name">{ledger.name}</span>
-        <span className="rv-ledgerbar-kind">{K.en} · {K.ko}</span>
-      </span>
-      <span className="rv-ledgerbar-right">
+    <div className="rv-ledgerbar">
+      <button className="rv-ledgerbar-main" onClick={onOpen}>
+        <span className="rv-ledgerbar-icon">{K.icon}</span>
+        <span className="rv-ledgerbar-mid">
+          <span className="rv-ledgerbar-name">{ledger.name}</span>
+          <span className="rv-ledgerbar-kind">
+            {K.en} · {K.ko}
+            {/* 마지막으로 파일이 올라간 시각. 갱신됐는지 여기서 바로 안다.
+                버전 번호는 설정 → 앱 정보에 있다. */}
+            {stamp && <span className="rv-ledgerbar-ver"> · 갱신 {stamp}</span>}
+          </span>
+        </span>
         <span className="rv-ledgerbar-swap">
           {ledgers.length > 1 ? '장부 바꾸기 ▾' : '장부 ▾'}
         </span>
-        {/* 개발 중에는 버전과 파일 시각을 늘 보이게 — 갱신됐는지 여기서 바로 안다 */}
-        {stamp && <span className="rv-ledgerbar-ver">{stamp}</span>}
-      </span>
-    </button>
+      </button>
+
+      <button className={'rv-icon-btn' + (refreshing ? ' rv-spin' : '')}
+              onClick={onRefresh} disabled={refreshing}
+              title="새로고침 (최신 파일을 새로 받아)"
+              aria-label="Force Refresh 강제 갱신">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none"
+             stroke="currentColor" strokeWidth="2"
+             strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+          <polyline points="20 4 20 11 13 11" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -529,6 +546,44 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
   const splits = rec.splits || [];
   const splitting = splits.length > 0;
   const remainder = U.splitRemainder(rec.amount_original, splits);
+
+  // ---- 금액 하나만 빼기 ----
+  //
+  // 영수증에 개인 품목이 하나 섞였을 때 줄을 두 개 만들어 각각 분류와 금액을 넣는 건
+  // 너무 번거롭다. 그럴 땐 "얼마를 빼면 되는지" 숫자 하나면 충분하다.
+  // 여기서 받은 금액으로 분할 두 줄을 대신 만들어 준다 —
+  // 뒤쪽 계산·문서·CSV 는 전부 기존 분할 구조를 그대로 쓴다.
+  const [excluding, setExcluding] = useState(false);
+  const [exclAmt, setExclAmt] = useState('');
+  const [exclNote, setExclNote] = useState('');
+
+  const exclRaw = U.parseAmount(exclAmt) || 0;
+  const taxAmt = U.parseAmount(rec.tax) || 0;
+
+  // 세금 처리는 나라마다 다르다.
+  //   미국: 진열 가격은 세전이고 계산할 때 판매세가 붙는다 → 뺄 때 그 몫도 같이 빼야 한다.
+  //   한국·일본·유럽: 가격에 부가세가 이미 들어 있다 → 적힌 가격 그대로 빼면 된다.
+  const taxAdded = (rec.country === 'US') && taxAmt > 0 && originalAmount > taxAmt;
+  const exclWithTax = taxAdded
+    ? exclRaw * (originalAmount / (originalAmount - taxAmt))
+    : exclRaw;
+  const zeroDecCur = rec.currency === 'KRW' || rec.currency === 'JPY';
+  const exclFinal = zeroDecCur ? Math.round(exclWithTax) : Math.round(exclWithTax * 100) / 100;
+
+  function applyExclude() {
+    const P = window.RV_KIND(ledger.kind);
+    const key = (P.exclude && P.exclude.cat) || 'other';
+    const rest = originalAmount - exclFinal;
+    setRec((r) => Object.assign({}, r, {
+      splits: [
+        { category: r.category, amount: zeroDecCur ? String(Math.round(rest)) : rest.toFixed(2),
+          note: '' },
+        { category: key, amount: String(exclFinal), note: exclNote || 'personal item' },
+      ],
+    }));
+    setExcluding(false);
+    setExclAmt(''); setExclNote('');
+  }
 
   function startSplit() {
     setRec((r) => Object.assign({}, r, {
@@ -930,11 +985,88 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
               Schedule C {cat.line}번 · {cat.en}
               {cat.hint ? ' — ' + cat.hint : ''}
             </p>
-            <button className="rv-btn-ghost rv-split-start" onClick={startSplit}>
-              ⑂ <L k="split" />
-            </button>
+            {/* 두 가지 길을 준다.
+                빼야 할 게 하나면 금액 하나만 — 그게 대부분이다.
+                분류가 정말 여럿으로 갈리면 그때만 줄을 나눈다. */}
+            {!excluding && (
+              <div className="rv-row rv-two-btn">
+                <button className="rv-btn-ghost rv-grow" onClick={() => setExcluding(true)}>
+                  − {P.exclude ? P.exclude.button : '일부 금액 빼기'}
+                </button>
+                <button className="rv-btn-ghost rv-grow" onClick={startSplit}>
+                  ⑂ 분류 나누기
+                </button>
+              </div>
+            )}
+
+            {excluding && (
+              <div className="rv-exclude">
+                <div className="rv-exclude-head">{P.exclude.title}</div>
+                <p className="rv-muted rv-small">{P.exclude.help}</p>
+
+                <label className="rv-label">
+                  뺄 금액 <span className="rv-cur-tag">{rec.currency || 'USD'}</span>
+                  <input className="rv-input" type="number" inputMode="decimal"
+                         step={zeroDecCur ? '1' : '0.01'}
+                         placeholder={zeroDecCur ? '2000' : '10.00'}
+                         value={exclAmt} onChange={(e) => setExclAmt(e.target.value)} />
+                </label>
+                <label className="rv-label">무엇인지 (영문으로 쓰면 문서에 그대로 나가)
+                  <input className="rv-input" placeholder="예: toilet seat — personal"
+                         value={exclNote} onChange={(e) => setExclNote(e.target.value)} />
+                </label>
+
+                {exclRaw > 0 && (
+                  <div className="rv-exclude-calc">
+                    {taxAdded ? (
+                      <>
+                        <div>
+                          품목 {U.inCurrency(exclRaw, rec.currency)} + 판매세 몫{' '}
+                          {U.inCurrency(exclFinal - exclRaw, rec.currency)} ={' '}
+                          <strong>{U.inCurrency(exclFinal, rec.currency)}</strong> 이 빠져
+                        </div>
+                        <div className="rv-muted rv-small">
+                          미국 영수증은 가격에 판매세가 따로 붙으니까, 뺄 때도 그 품목 몫의
+                          세금을 같이 뺐어.
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <strong>{U.inCurrency(exclFinal, rec.currency)}</strong> 이 공제에서 빠져
+                        </div>
+                        <div className="rv-muted rv-small">
+                          이 나라 영수증은 가격에 세금이 이미 들어 있어서 적힌 값 그대로 빼면 돼.
+                        </div>
+                      </>
+                    )}
+                    <div className="rv-muted rv-small">
+                      영수증 총액 {U.inCurrency(originalAmount, rec.currency)} 은 그대로 남고,
+                      남은 {U.inCurrency(originalAmount - exclFinal, rec.currency)} 만{' '}
+                      {P.counted.ko}에 잡혀.
+                    </div>
+                  </div>
+                )}
+
+                <div className="rv-row rv-two-btn">
+                  <button className="rv-btn-ghost rv-grow"
+                          onClick={() => { setExcluding(false); setExclAmt(''); setExclNote(''); }}>
+                    취소
+                  </button>
+                  <button className="rv-btn-sm rv-grow" onClick={applyExclude}
+                          disabled={!(exclFinal > 0 && exclFinal < originalAmount)}>
+                    적용
+                  </button>
+                </div>
+                {!(originalAmount > 0) && (
+                  <p className="rv-warn-text rv-small">먼저 위에 영수증 총액을 넣어줘.</p>
+                )}
+              </div>
+            )}
+
             <p className="rv-muted rv-small">
-              가죽이랑 공구를 한 번에 산 영수증처럼, 한 장을 여러 분류로 쪼갤 때.
+              개인 물건이 하나 섞였을 땐 <strong>금액 하나만</strong> 빼면 돼.
+              가죽과 공구처럼 <strong>사업용끼리 분류가 갈릴 때만</strong> 줄을 나누면 돼.
             </p>
           </>
         ) : (
@@ -961,7 +1093,12 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
                 <div key={i} className={'rv-split-row' + (empty ? ' rv-split-empty' : '')}>
                   <div className="rv-split-head">
                     <span className="rv-split-n">{i + 1}</span>
-                    <span className="rv-split-title">{i + 1}번째 항목</span>
+                    {/* "1번째 항목" 은 아무 뜻이 없다. 무엇으로 잡혔는지를 보여준다. */}
+                    <span className="rv-split-title">
+                      {s.note ? s.note
+                        : sc.deduct === 0 ? sc.ko + ' — 공제에서 빠짐'
+                        : sc.ko}
+                    </span>
                     <button className="rv-split-x" onClick={() => removeSplit(i)}
                             title="이 줄 지우기">✕ 지우기</button>
                   </div>
@@ -1817,12 +1954,6 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
   const [quota, setQuota] = useState(null);
   const [diag, setDiag] = useState(null);
   const [diagOpen, setDiagOpen] = useState(false);   // 접어 둔 상태로 시작
-  const [refreshing, setRefreshing] = useState(false);
-
-  async function doHardRefresh() {
-    setRefreshing(true);
-    await window.RV_APP.hardRefresh('settings');
-  }
 
   const loadInvites = useCallback(async () => {
     try { setInvites(await DB.pendingInvites(ledger.id)); } catch (e) {}
@@ -1857,22 +1988,7 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
 
   return (
     <div className="rv-screen">
-      <div className="rv-topbar">
-        <span />
-        <strong>설정</strong>
-        {/* 강제 갱신. 큰 버튼 대신 아이콘 하나로 — 자주 쓰지만 자리를 차지할 일은 아니다. */}
-        <button className={'rv-icon-btn' + (refreshing ? ' rv-spin' : '')}
-                onClick={doHardRefresh} disabled={refreshing}
-                title="강제 갱신 (캐시를 지우고 최신 파일을 새로 받아)"
-                aria-label="Force Refresh 강제 갱신">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none"
-               stroke="currentColor" strokeWidth="2"
-               strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 11a8 8 0 1 0-2.3 5.7" />
-            <polyline points="20 4 20 11 13 11" />
-          </svg>
-        </button>
-      </div>
+      <div className="rv-topbar"><span /><strong>설정</strong><span /></div>
       <div className="rv-body">
         {msg && <Banner kind="info" onClose={() => setMsg('')}>{msg}</Banner>}
         {err && <Banner kind="error" onClose={() => setErr('')}>{err}</Banner>}
@@ -2006,9 +2122,10 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
              아이콘만 있으면 눌러도 되는 건지 알 수가 없어서. */}
         <h3 className="rv-h3"><L k="maintenance" /></h3>
         <p className="rv-muted rv-small">
-          화면 오른쪽 위 <strong>⟳</strong> 가 <strong>강제 갱신</strong>이야.
-          저장된 캐시와 서비스워커를 지우고 최신 파일을 새로 받아. 코드를 고쳤는데 화면이
+          앱 <strong>맨 위 오른쪽 ⟳</strong> 가 <strong>새로고침</strong>이야. 어느 화면에서든
+          누를 수 있어. 저장된 캐시를 지우고 최신 파일을 새로 받아 — 코드를 고쳤는데 화면이
           그대로일 때 누르면 돼. 영수증 자료는 서버에 있으니 지워지지 않아.
+          맨 위에 보이는 시각이 <strong>지금 돌아가는 코드가 올라간 때</strong>야.
         </p>
 
         {/* ---- 연결 상태 (개발 중에만, 접어 둔다) ---- */}
@@ -2071,6 +2188,7 @@ function App() {
     } catch (e) { return 'list'; }
   });
   const [sheet, setSheet] = useState(false);   // 장부 고르는 판이 열렸나
+  const [refreshing, setRefreshing] = useState(false);
   const [mode, setMode] = useState(null);            // null | add | edit | detail | tax
   const [current, setCurrent] = useState(null);
   const [rows, setRows] = useState([]);
@@ -2151,10 +2269,10 @@ function App() {
     let alive = true;
     window.RV_APP.lastDeployed().then((d) => {
       if (!alive) return;
-      const t = d ? (d.getMonth() + 1) + '/' + d.getDate() + ' ' +
-                    String(d.getHours()).padStart(2, '0') + ':' +
-                    String(d.getMinutes()).padStart(2, '0') : '';
-      setStamp('v' + window.RV_APP.version() + (t ? ' · ' + t : ''));
+      // 맨 위에는 날짜와 시각만. 버전 번호는 설정 → 앱 정보에서 본다.
+      setStamp(d ? (d.getMonth() + 1) + '/' + d.getDate() + ' ' +
+                   String(d.getHours()).padStart(2, '0') + ':' +
+                   String(d.getMinutes()).padStart(2, '0') : '');
     });
     return () => { alive = false; };
   }, []);
@@ -2276,8 +2394,13 @@ function App() {
   return skin(
     <div className="rv-app">
       {/* 어느 장부를 보고 있는지 — 늘 맨 위에 */}
-      <LedgerBar ledger={ledger} ledgers={ledgers} stamp={stamp}
-                 onOpen={() => setSheet(true)} />
+      <LedgerBar ledger={ledger} ledgers={ledgers} stamp={stamp} refreshing={refreshing}
+                 onOpen={() => setSheet(true)}
+                 onRefresh={() => {
+                   setRefreshing(true);
+                   // 지금 보고 있는 탭으로 돌아오게 한다
+                   window.RV_APP.hardRefresh(tab);
+                 }} />
 
       {sheet && (
         <LedgerSheet

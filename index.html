@@ -150,13 +150,16 @@
   /* 장부마다 강조색(--tan)이 갈리므로 이 막대의 색도 저절로 따라간다.
      글자를 읽기 전에 색으로 먼저 "지금 어느 장부인지" 알게 하는 게 목적이다. */
   .rv-root{height:100%}
-  .rv-ledgerbar{display:flex;align-items:center;gap:11px;width:100%;
-                padding:11px 16px;text-align:left;border:none;
+  .rv-ledgerbar{display:flex;align-items:center;gap:6px;width:100%;
+                padding:9px 12px 9px 16px;
                 background:var(--panel2);   /* color-mix 를 모르는 브라우저용 */
                 background:linear-gradient(180deg,
                   color-mix(in srgb, var(--tan) 16%, var(--panel)) 0%,
                   var(--panel) 100%);
                 border-bottom:2px solid var(--tan)}
+  /* 막대 안쪽: 왼쪽 넓은 부분만 장부 바꾸기 버튼, 오른쪽 ⟳ 는 따로 */
+  .rv-ledgerbar-main{display:flex;align-items:center;gap:11px;flex:1;min-width:0;
+                     background:none;border:none;padding:2px 0;text-align:left}
   .rv-ledgerbar-icon{width:32px;height:32px;flex-shrink:0;border-radius:9px;
                      display:flex;align-items:center;justify-content:center;
                      font-size:17px;color:#20180c;background:var(--tan)}
@@ -165,11 +168,10 @@
                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rv-ledgerbar-kind{font-size:11px;color:var(--tan);white-space:nowrap;
                      overflow:hidden;text-overflow:ellipsis}
-  .rv-ledgerbar-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;
-                      flex-shrink:0}
   .rv-ledgerbar-swap{font-size:11px;color:var(--tan);border:1px solid var(--tan-dim);
-                     border-radius:20px;padding:3px 9px;white-space:nowrap}
-  .rv-ledgerbar-ver{font-size:9.5px;color:var(--muted);
+                     border-radius:20px;padding:3px 9px;white-space:nowrap;flex-shrink:0}
+  /* 마지막으로 파일이 올라간 시각. 버전 번호는 설정 → 앱 정보에 있다. */
+  .rv-ledgerbar-ver{color:var(--muted);
                     font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 
   .rv-inledger{display:flex;align-items:center;gap:8px;
@@ -275,6 +277,16 @@
     background:var(--panel2); border:1px solid var(--line);
   }
   .rv-en-head{font-size:13px; color:var(--tan); margin-bottom:4px}
+
+  /* ---------- 금액 하나만 빼기 ---------- */
+  .rv-two-btn{margin-top:12px;gap:8px}
+  .rv-two-btn .rv-btn-sm{padding:11px 15px}
+  .rv-exclude{margin-top:14px;padding:14px;border-radius:12px;
+              background:var(--panel2);border:1px solid var(--tan-dim)}
+  .rv-exclude-head{font-size:14px;font-weight:700;color:var(--tan);margin-bottom:6px}
+  .rv-exclude-calc{margin-top:12px;padding:11px 12px;border-radius:10px;
+                   background:var(--panel);border:1px solid var(--line);
+                   font-size:13px;line-height:1.7}
 
   /* ---------- 분할 ---------- */
   .rv-split-start{margin-top:12px;width:100%}
