@@ -50,11 +50,22 @@ function json(body, status, origin) {
 const SETTINGS = {
   business: {
     intro: 'You are reading a purchase receipt for a small leather-craft studio based in California.',
+    // 한 영수증에 사업용과 개인용이 섞이는 일이 흔하다. 모델이 조용히 빼버리면
+    // 총액이 안 맞으므로, 빼지 말고 "개인" 분류로 갈라 놓으라고 시킨다.
+    mixed: '- Receipts often mix business and personal items (e.g. tools plus household goods).\n'
+      + '  NEVER drop a personal item or reduce "amount" — the total must match the receipt.\n'
+      + '  Instead, when you can read per-item prices and some items are clearly personal\n'
+      + '  (toiletries, household or bathroom fittings, groceries, kids\' items, clothing),\n'
+      + '  return them as their own split line with the personal category key from the list.\n'
+      + '  When in doubt treat an item as business and let the owner decide.',
     purpose: 'in English, what was bought and why it is a business expense',
     purposeHelp: 'Name the actual items and, when you can tell, why they serve the business — '
       + 'e.g. "waxed thread and leather dye for bag production", "storage bins for parts".',
   },
   property: {
+    mixed: '- Receipts often mix work that adds to the home\'s value with plain repairs or\n'
+      + '  movable furnishings. Never drop an item; when per-item prices are readable,\n'
+      + '  return the non-improvement items as their own split line with the matching key.',
     intro: 'You are reading a purchase or contractor receipt for the remodeling of a private home '
       + 'in California. The owner is recording costs that may be added to the home\'s cost basis, '
       + 'so the category must reflect what part of the house the money went to.',
@@ -125,6 +136,7 @@ function buildPrompt(categories, countries, today, kind) {
     '  Split amounts are in the SAME currency as "amount" and MUST add up to it exactly —',
     '  distribute tax and shipping in proportion, putting any leftover on the largest part.',
     '  Use at most 4 parts. If you cannot read reliable per-item amounts, return null.',
+    S.mixed,
     '- "category" is always filled in: the single category, or the largest part when split.',
     '- "payment_ref" identifies which card or account paid, so it can be matched against a',
     '  statement later. Receipts usually print the brand and the last four digits — return',
