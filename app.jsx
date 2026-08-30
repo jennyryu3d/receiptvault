@@ -79,9 +79,12 @@ function CategorySelect({ value, onChange, ledger }) {
         if (!items.length) return null;
         return (
           <optgroup key={sec.group} label={sec.pick || sec.title}>
-            {/* 목록 안에서는 한글만. 영문까지 넣으면 줄이 길어져 폰에서 두 줄씩 접히고
-              무엇을 고르는지가 더 안 보인다. 영문은 고른 뒤 아래 줄에 나온다. */}
-          {items.map((c) => <option key={c.key} value={c.key}>{c.ko}</option>)}
+            {/* 한글 먼저, 영문은 뒤에. 세무사 자료에 실제로 찍히는 이름이라
+                고르는 순간 눈에 익어 있어야 한다.
+                <option> 안에서는 글자 크기를 못 바꾸니 · 로만 가른다. */}
+            {items.map((c) => (
+              <option key={c.key} value={c.key}>{c.ko} · {c.en}</option>
+            ))}
           </optgroup>
         );
       })}
@@ -508,7 +511,7 @@ function InAppCamera({ onShot, onCancel, onFail }) {
   );
 }
 
-function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }) {
+function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone, onCancel }) {
   const ledgerId = ledger.id;
   const P = window.RV_KIND(ledger.kind);      // 장부 종류가 화면을 정한다
   const F = P.form;
@@ -638,6 +641,16 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
   }
 
   function set(k, v) { setRec((r) => Object.assign({}, r, { [k]: v })); }
+
+  // 가맹점 이름을 전에 쓴 것으로 맞추면 영문 표기도 따라온다.
+  // 이미 적어 둔 영문은 건드리지 않는다 — 사람이 넣은 값이 이긴다.
+  function pickMerchant(v) {
+    const hit = (merchants || []).find((m) => m.name === v && m.en);
+    setRec((r) => Object.assign({}, r, {
+      merchant: v,
+      merchant_en: (hit && !(r.merchant_en || '').trim()) ? hit.en : r.merchant_en,
+    }));
+  }
 
   // ---- 통화와 환율 ----
   const foreign = rec.currency && rec.currency !== 'USD';
@@ -960,12 +973,36 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
         }
       }
       clearDraft();
-      onDone();
+      onDone(saved);
     } catch (ex) {
       setErr(ex.message || '저장하지 못했어요.');
       setBusy('');
     }
   }
+
+  // 거래일이 말이 되는지 본다.
+  //
+  // 한국 영수증은 연도를 두 자리로 찍는다 — "26/08/18" 은 2026년 8월 18일이다.
+  // AI가 이걸 2014년으로 읽은 적이 있고, 그러면 조용히 세 가지가 한꺼번에 틀린다:
+  // 그 해의 환율로 환산되고, 그 해로 저장되고, 목록의 연도 칸에 없어서 사라진다.
+  // 막을 수는 없어도 눈에 띄게는 할 수 있다.
+  const dateWarn = useMemo(() => {
+    if (!rec.purchased_at) return '';
+    var d = new Date(rec.purchased_at + 'T00:00:00');
+    if (isNaN(d.getTime())) return '';
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var days = Math.round((today - d) / 86400000);
+    if (days < -1) {
+      return '거래일이 미래야 (' + rec.purchased_at + '). 영수증을 다시 봐줘.';
+    }
+    if (days > 550) {
+      return '거래일이 ' + d.getFullYear() + '년으로 잡혀 있어 — 오늘과 ' +
+             (days > 700 ? Math.round(days / 365) + '년쯤' : '1년 넘게') + ' 차이 나. ' +
+             '한국 영수증은 연도를 두 자리로 찍어서(26/08/18 = 2026년) AI가 잘못 읽을 때가 있어. ' +
+             '연도가 틀리면 환율도 그 해 것으로 계산되니까 꼭 확인해줘.';
+    }
+    return '';
+  }, [rec.purchased_at]);
 
   const cat = window.RV_CAT(rec.category);
   // 분할 중이고 합계가 맞을 때만 분할 기준으로 계산한다. 안 맞는 중간 상태에서
@@ -1124,11 +1161,18 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
                  onChange={(e) => set('purchased_at', e.target.value)} />
         </label>
         <p className="rv-muted rv-small">영수증에 찍힌 거래일이야. 목록도 이 날짜순으로 정렬돼.</p>
+        {dateWarn && <Banner kind="warn">{dateWarn}</Banner>}
 
         <div className="rv-row">
           <label className="rv-label rv-grow"><L k="merchant" />
+            {/* 같은 가게에서 계속 산다. 전에 넣은 이름을 골라 쓸 수 있게 —
+                AI가 이름을 엉뚱하게 읽었을 때 고쳐 넣는 게 이 칸의 주된 일이다. */}
             <input className="rv-input" type="text" placeholder="Tandy Leather"
-                   value={rec.merchant} onChange={(e) => set('merchant', e.target.value)} />
+                   list="rv-merchants" value={rec.merchant}
+                   onChange={(e) => pickMerchant(e.target.value)} />
+            <datalist id="rv-merchants">
+              {(merchants || []).map((m) => <option key={m.name} value={m.name} />)}
+            </datalist>
           </label>
           <label className="rv-label rv-country-sel"><L k="country" />
             <select className="rv-input" value={rec.country || 'US'}
@@ -1319,9 +1363,10 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
                     <span className="rv-split-n">{i + 1}</span>
                     {/* "1번째 항목" 은 아무 뜻이 없다. 무엇으로 잡혔는지를 보여준다. */}
                     <span className="rv-split-title">
-                      {s.note ? s.note
-                        : sc.deduct === 0 ? sc.ko + ' — 공제에서 빠짐'
-                        : sc.ko}
+                      {s.note || sc.ko}
+                      <span className="rv-split-en">
+                        {sc.en}{sc.deduct === 0 ? ' · 공제에서 빠짐' : ''}
+                      </span>
                     </span>
                     <button className="rv-split-x" onClick={() => removeSplit(i)}
                             title="이 줄 지우기">✕ 지우기</button>
@@ -2360,6 +2405,62 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
     } catch (ex) { setErr(ex.message || '초대하지 못했어요.'); }
   }
 
+  // ---- 백업 ----
+  // 사진을 한 장씩 받아 zip 으로 묶는다. 폰에서는 수십 초 걸릴 수 있어서
+  // 몇 장째인지 계속 보여준다 — 멈춘 줄 알고 화면을 떠나면 처음부터 다시다.
+  const [bk, setBk] = useState(null);            // { done, total, label }
+  const [bkDone, setBkDone] = useState('');
+  const [bkYear, setBkYear] = useState('');
+  const [bkYears, setBkYears] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!ledger) return;
+    DB.list({ ledgerId: ledger.id }).then((rows) => {
+      if (!alive) return;
+      const ys = Array.from(new Set(rows.map((r) => (r.purchased_at || '').slice(0, 4))
+                                        .filter(Boolean))).sort().reverse();
+      setBkYears(ys);
+    }, () => {});
+    return () => { alive = false; };
+  }, [ledger && ledger.id]);
+
+  async function runBackup() {
+    setErr(''); setBkDone(''); setBk({ done: 0, total: 0, label: '' });
+    try {
+      const rows = await DB.list({ ledgerId: ledger.id, year: bkYear || undefined });
+      if (!rows.length) {
+        setBk(null);
+        return setErr('이 범위에 영수증이 없어. 받을 게 없네.');
+      }
+      const got = await window.RV_BACKUP.build(ledger, rows, (done, total, label) => {
+        setBk({ done: done, total: total, label: label ? '사진: ' + label : '' });
+      });
+
+      const tag = window.RV_BACKUP.safeName(ledger.name) + '-' + (bkYear || 'all') +
+                  '-' + new Date().toISOString().slice(0, 10);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(got.blob);
+      a.download = 'ReceiptVault-' + tag + '.zip';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+
+      setBk(null);
+      setBkDone(
+        '받았어 — 영수증 ' + rows.length + '건, 사진 ' + got.photos + '장. ' +
+        (got.missing.length
+          ? '다만 사진 ' + got.missing.length + '장을 못 받았어. zip 안 README.txt 에 목록이 있어 — ' +
+            '인터넷이 끊겼던 거면 다시 한 번 받아줘.'
+          : '폰의 다운로드 폴더에 있어. 구글 드라이브 같은 데 한 부 더 올려둬.')
+      );
+    } catch (ex) {
+      setBk(null);
+      setErr(ex && ex.message === 'BACKUP_TOO_BIG'
+        ? '사진이 너무 많아서 한 번에 못 묶어. 위에서 연도를 하나 골라 나눠 받아줘.'
+        : (ex.message || '백업을 만들지 못했어.'));
+    }
+  }
+
   return (
     <div className="rv-screen">
       <div className="rv-topbar"><span /><strong>설정</strong><span /></div>
@@ -2490,6 +2591,45 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
           Anthropic API로 한 번 전달되고, 결과만 돌아온 뒤 따로 보관되지 않아.
           자동 인식을 끄면 사진은 이 앱 밖으로 나가지 않아.
         </p>
+        <p className="rv-muted rv-small">
+          다만 <strong>Supabase 무료 요금제에는 자동 백업이 없어.</strong> 사진은 유료 요금제의
+          백업에도 안 들어가고, 장부를 오래 안 쓰면 프로젝트가 잠들었다가 1년이 지나면
+          되살릴 수 없게 돼. 그러니 아래 <strong>백업</strong>으로 받은 파일이 진짜 사본이야.
+        </p>
+
+        {/* ---- 백업 ----
+             서버 하나에만 있는 자료는 백업이 아니다. 무료 Supabase 에는 자동 백업이
+             없고, 사진은 유료 요금제의 백업에도 안 들어간다. 그래서 손에 쥐는 파일을
+             만들어 준다. 앱이 없어져도 열리는 형태여야 의미가 있다. */}
+        <h3 className="rv-h3"><L k="backup" /></h3>
+        <p className="rv-muted rv-small">
+          영수증 표와 <strong>사진 원본</strong>을 zip 하나로 내려받아.
+          사진 이름이 <em>「날짜 가맹점」</em>이라 앱 없이 탐색기에서도 찾을 수 있고,
+          표는 엑셀에서 바로 열려. <strong>종이 영수증을 버릴 거면 이걸 꼭 받아둬</strong> —
+          그때부터는 이 사진이 유일한 증빙이야.
+        </p>
+        <div className="rv-row">
+          <label className="rv-label rv-grow">받을 범위
+            <select className="rv-input" value={bkYear}
+                    onChange={(e) => setBkYear(e.target.value)}>
+              <option value="">이 장부 전체</option>
+              {bkYears.map((y) => <option key={y} value={y}>{y}년</option>)}
+            </select>
+          </label>
+        </div>
+        <button className="rv-btn rv-wide-sm" disabled={!!bk} onClick={runBackup}>
+          {bk ? (bk.total ? '내려받는 중 ' + bk.done + ' / ' + bk.total : '준비 중...') : '⬇ 백업 파일 만들기'}
+        </button>
+        {bk && bk.label && <p className="rv-muted rv-small">{bk.label}</p>}
+        {bkDone && (
+          <Banner kind="info" onClose={() => setBkDone('')}>{bkDone}</Banner>
+        )}
+        <p className="rv-muted rv-small">
+          받은 zip 은 <strong>폰에만 두지 말고</strong> 구글 드라이브 같은 데 한 부 더 올려둬.
+          사업 경비는 신고한 해로부터 <strong>3년</strong>, 집 공사비는 <strong>집을 판 뒤 3년</strong>까지
+          보관해야 해 — 집 쪽은 사실상 갖고 있는 내내야.
+          {' '}영수증을 새로 넣은 날 한 번씩 받아두면 제일 편해.
+        </p>
 
         {/* ---- 점검 ----
              버튼은 맨 위 오른쪽 아이콘으로 옮겼다. 설명만 여기 남긴다 —
@@ -2570,13 +2710,25 @@ function App() {
   const [err, setErr] = useState('');
   const [year, setYear] = useState(new Date().getFullYear());
 
+  // 장부가 실제로 갖고 있는 연도와 가맹점 목록
+  const [vocab, setVocab] = useState({ years: [], merchants: [] });
+  useEffect(() => {
+    let alive = true;
+    if (!ledgerId) { setVocab({ years: [], merchants: [] }); return; }
+    DB.vocab(ledgerId).then((v) => { if (alive) setVocab(v); }, () => {});
+    return () => { alive = false; };
+  }, [ledgerId, rows]);
+
+  // 연도 칸은 "정해진 범위" 가 아니라 "정해진 범위 + 실제로 자료가 있는 연도" 다.
+  // 범위로만 만들면 AI가 연도를 잘못 읽어 저장된 영수증을 찾아갈 방법이 없어진다.
   const years = useMemo(() => {
     const now = new Date().getFullYear();
     const first = Math.min(window.RV_CONFIG.FIRST_YEAR || now, now);
-    const out = [];
-    for (let y = now; y >= first; y--) out.push(y);
-    return out;
-  }, []);
+    const set = new Set(vocab.years);
+    for (let y = now; y >= first; y--) set.add(y);
+    set.add(year);
+    return Array.from(set).sort((a, b) => b - a);
+  }, [vocab.years, year]);
 
   useEffect(() => {
     if (!DB.configured()) { setSession(null); return; }
@@ -2734,8 +2886,15 @@ function App() {
         initial={mode === 'edit' ? current : null}
         ledger={ledger}
         paymentRefs={paymentRefs}
+        merchants={vocab.merchants}
         session={session}
-        onDone={() => { setMode(null); setCurrent(null); load(); }}
+        // 방금 저장한 영수증이 다른 연도로 들어갔으면 그 연도로 옮겨간다.
+        // 안 그러면 저장은 됐는데 목록에 없어서 "저장이 안 된다" 로 보인다.
+        onDone={(saved) => {
+          const y = Number(String(saved && saved.purchased_at || '').slice(0, 4));
+          if (y && y !== year) setYear(y);
+          setMode(null); setCurrent(null); load();
+        }}
         onCancel={() => setMode(mode === 'edit' ? 'detail' : null)}
       />
     );

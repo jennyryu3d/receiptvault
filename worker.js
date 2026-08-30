@@ -114,13 +114,26 @@ function buildPrompt(categories, countries, today, kind) {
     '  Read it from the symbol (₩ → KRW, ¥ → JPY, € → EUR, $ → usually USD) or from the',
     '  business registration / address. Do NOT convert the amount — report it as printed.',
     '- "amount" is the grand total in that same currency, including tax and shipping.',
+    // 한국 전표는 공급가 / 부가세 / 합계 세 줄이 나란히 찍힌다. 첫 줄을 집으면
+    // 부가세만큼 적게 기록된다 — 조용히 틀리는 종류라 못 박아 둔다.
+    '  Korean slips print three lines: 금액 or 공급가액 (net), 부가세 (VAT), 합계 (total).',
+    '  "amount" is 합계 — the bottom line actually charged. "tax" is 부가세.',
     '- "country" is where the purchase happened, inferred from the address, phone number,',
     '  tax id or language on the receipt. Use XX only if there is truly no clue.',
     '',
     'The taxpayer files US taxes, so what reaches her accountant must be English:',
     '- "merchant" keeps the name as printed (Korean stays Korean).',
+    // 상호를 못 찾으면 영수증에 있는 아무 글자나 가게 이름으로 내놓는 일이 있다.
+    // ("Kiss Check" 를 상호로 돌려준 적이 있다.) 어디를 봐야 하는지 못 박는다.
+    '  On a Korean receipt the business name is the 상호 / 사업자 name, printed next to',
+    '  사업자등록번호, 대표자 or the address block — NOT the header (영수증, 거래명세표,',
+    '  현금영수증, 신용카드매출전표), not the card brand, not the payment network, and not',
+    '  a stray word elsewhere on the paper. If you cannot locate the business name,',
+    '  return null. A guessed merchant name is worse than an empty one.',
     '- "merchant_en" is the English form: use the business\'s own English name if it has one,',
     '  otherwise romanize it (한국마켓 → "Hankook Market", 롯데마트 → "Lotte Mart").',
+    '  It must be a romanization of "merchant" itself — never a translation of other words',
+    '  on the receipt. Null when merchant is null.',
     '- "notes_en" is the most important field for an audit. ' + S.purposeHelp,
     '  Plain English, under 15 words. Leave null only if the line items are unreadable.',
     '- If the receipt is already in English, set merchant_en to the same value as merchant.',
@@ -129,6 +142,13 @@ function buildPrompt(categories, countries, today, kind) {
     '- Amounts are numbers, no currency symbols, no thousands separators.',
     '- If the year is missing on the receipt, assume the most recent year that makes the',
     '  date fall on or before ' + (today || 'today') + '.',
+    // 한국 영수증은 연도를 두 자리로 찍는다. 이걸 잘못 읽으면 환율까지 그 해 것이
+    // 되어 조용히 틀린 금액이 저장된다. 실제로 26/08/18 을 2014년으로 읽은 적이 있다.
+    '- Korean receipts usually print the date as YY/MM/DD or YY.MM.DD — "26/08/18" and',
+    '  "거래일시 26/08/18 13:49" both mean 2026-08-18. A two-digit year is 20YY, never 19YY',
+    '  and never a different decade. Unless the receipt prints a full four-digit year,',
+    '  the date must be within about a year of ' + (today || 'today') + '. If what you read',
+    '  would be older than that, you misread it — re-read the digits or return null.',
     '- Splitting rule: leave "splits" null when the whole receipt belongs to one category.',
     '  When line items clearly belong to different categories AND you can read the',
     '  per-item amounts, return',

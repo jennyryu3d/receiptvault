@@ -470,6 +470,35 @@
       return res.data || [];
     },
 
+    // 장부가 실제로 갖고 있는 연도와 가맹점 이름.
+    // 연도: 목록의 연도 칸을 데이터로 채우려고 쓴다. 정해진 범위로만 만들면
+    //   범위 밖 연도로 저장된 영수증은 화면에서 영영 못 찾는다 — 실제로 그 일이 났다.
+    // 가맹점: 같은 가게에서 계속 사니까 매번 손으로 치게 두면 안 된다.
+    vocab: async function (ledgerId) {
+      var c = supa(); if (!c || !ledgerId) return { years: [], merchants: [] };
+      var res = await c.from('receipts')
+                  .select('purchased_at, merchant, merchant_en')
+                  .eq('ledger_id', ledgerId)
+                  .order('purchased_at', { ascending: false });
+      if (res.error) return { years: [], merchants: [] };
+
+      var ys = {}, seen = {}, merchants = [];
+      (res.data || []).forEach(function (r) {
+        var y = (r.purchased_at || '').slice(0, 4);
+        if (/^\d{4}$/.test(y)) ys[y] = 1;
+        var name = (r.merchant || '').trim();
+        if (name && !seen[name]) {
+          seen[name] = 1;
+          // 최근 것이 먼저 오므로 영문 표기도 가장 최근 것이 남는다
+          merchants.push({ name: name, en: (r.merchant_en || '').trim() });
+        }
+      });
+      return {
+        years: Object.keys(ys).sort().reverse().map(Number),
+        merchants: merchants,
+      };
+    },
+
     save: async function (rec, ledgerId, session) {
       var c = need();
       if (!ledgerId) throw new Error('장부가 선택되지 않았어요.');
@@ -850,8 +879,256 @@
     },
   };
 
+  // =============================================================
+  // RV_ZIP — 백업 파일을 만드는 최소한의 zip
+  //
+  // 라이브러리를 안 쓰는 이유: 사진은 이미 JPEG(압축된 것)이라 다시 압축해봐야
+  // 크기가 안 줄고 시간만 든다. 그래서 "저장만"(store) 방식으로 담는다.
+  // 그러면 zip 규격 중 우리가 쓸 부분이 헤더 세 종류뿐이라 직접 쓰는 게 낫다 —
+  // 남의 CDN 이 죽어도 백업 기능은 살아 있어야 한다.
+  // =============================================================
+  var RV_ZIP = (function () {
+    var TABLE = (function () {
+      var t = new Uint32Array(256);
+      for (var n = 0; n < 256; n++) {
+        var c = n;
+        for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        t[n] = c >>> 0;
+      }
+      return t;
+    })();
+
+    function crc32(buf) {
+      var c = 0xFFFFFFFF;
+      for (var i = 0; i < buf.length; i++) c = TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+      return (c ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    // zip 은 1980년식 DOS 날짜를 쓴다. 2초 단위이고 1980년 이전은 못 담는다.
+    function dosTime(d) {
+      return ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF;
+    }
+    function dosDate(d) {
+      var y = Math.max(1980, d.getFullYear());
+      return (((y - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+    }
+
+    function utf8(s) { return new TextEncoder().encode(s); }
+
+    // files: [{ name: '경로/이름', data: Uint8Array, date?: Date }]
+    function make(files, when) {
+      when = when || new Date();
+      var parts = [];      // 최종 Blob 조각들
+      var central = [];    // 중앙 목록
+      var offset = 0;
+
+      files.forEach(function (f) {
+        var name = utf8(f.name);
+        var data = f.data;
+        var crc = crc32(data);
+        var d = f.date || when;
+
+        var head = new DataView(new ArrayBuffer(30));
+        head.setUint32(0, 0x04034b50, true);   // 로컬 헤더 표시
+        head.setUint16(4, 20, true);           // 필요한 버전
+        head.setUint16(6, 0x0800, true);       // 파일 이름은 UTF-8 (한글 이름을 위해)
+        head.setUint16(8, 0, true);            // 저장만 (압축 안 함)
+        head.setUint16(10, dosTime(d), true);
+        head.setUint16(12, dosDate(d), true);
+        head.setUint32(14, crc, true);
+        head.setUint32(18, data.length, true);
+        head.setUint32(22, data.length, true);
+        head.setUint16(26, name.length, true);
+        head.setUint16(28, 0, true);
+
+        parts.push(new Uint8Array(head.buffer), name, data);
+
+        var cen = new DataView(new ArrayBuffer(46));
+        cen.setUint32(0, 0x02014b50, true);
+        cen.setUint16(4, 20, true);            // 만든 버전
+        cen.setUint16(6, 20, true);            // 필요한 버전
+        cen.setUint16(8, 0x0800, true);
+        cen.setUint16(10, 0, true);
+        cen.setUint16(12, dosTime(d), true);
+        cen.setUint16(14, dosDate(d), true);
+        cen.setUint32(16, crc, true);
+        cen.setUint32(20, data.length, true);
+        cen.setUint32(24, data.length, true);
+        cen.setUint16(28, name.length, true);
+        cen.setUint32(42, offset, true);       // 이 파일의 로컬 헤더 위치
+        central.push(new Uint8Array(cen.buffer), name);
+
+        offset += 30 + name.length + data.length;
+      });
+
+      var cdSize = central.reduce(function (n, p) { return n + p.length; }, 0);
+      var end = new DataView(new ArrayBuffer(22));
+      end.setUint32(0, 0x06054b50, true);
+      end.setUint16(8, files.length, true);
+      end.setUint16(10, files.length, true);
+      end.setUint32(12, cdSize, true);
+      end.setUint32(16, offset, true);
+
+      return new Blob(parts.concat(central, [new Uint8Array(end.buffer)]),
+                      { type: 'application/zip' });
+    }
+
+    return { make: make, crc32: crc32 };
+  })();
+
+  // =============================================================
+  // RV_BACKUP — 앱이 없어져도 남는 사본
+  //
+  // 무료 Supabase 에는 자동 백업이 없고, 사진(Storage)은 유료 요금제의 백업에도
+  // 안 들어간다. 그러니 백업은 사용자가 손에 쥐는 파일이어야 한다.
+  //
+  // 그래서 zip 안에는 "앱이 있어야 읽히는 것"을 하나도 안 넣는다:
+  //   photos/  — 날짜·가맹점 이름이 붙은 JPEG. 탐색기에서 그냥 보인다.
+  //   receipts.csv — 엑셀에서 열린다. 세무사에게 그대로 넘겨도 된다.
+  //   receipts.json — 나중에 앱으로 되돌릴 때 쓰는 원본 그대로의 값.
+  //   README.txt — 5년 뒤에 이 폴더를 열 사람에게 하는 설명.
+  // =============================================================
+  var RV_BACKUP = (function () {
+
+    // 파일 이름에 못 쓰는 글자만 걷어낸다. 한글은 그대로 둔다 — 알아볼 수 있어야 한다.
+    function safeName(s) {
+      return String(s || '').replace(/[\/\\:*?"<>|\x00-\x1f]/g, ' ')
+                            .replace(/\s+/g, ' ').trim().slice(0, 40);
+    }
+
+    function csvOf(rows, ledger) {
+      var head = [
+        'receipt_id', 'ledger', 'date', 'merchant', 'merchant_en', 'country',
+        'currency', 'amount_original', 'fx_rate', 'fx_rate_date', 'fx_source',
+        'amount_usd', 'sales_tax', 'category_key', 'category_en', 'form_line',
+        'business_pct', 'deductible_usd', 'payment_method', 'payment_ref',
+        'purpose', 'purpose_en', 'splits_json', 'photo_files', 'entered_at',
+      ];
+      var P = window.RV_KIND(ledger.kind);
+      var out = [head.join(',')];
+      rows.forEach(function (r) {
+        var cat = window.RV_CAT(r.category);
+        out.push([
+          r.id, ledger.name, r.purchased_at, r.merchant, r.merchant_en, r.country,
+          r.currency, r.amount_original, r.fx_rate, r.fx_rate_date, r.fx_source,
+          r.total, r.tax, r.category, cat.en, (P.lineLabel && cat.line ? P.lineLabel + ' ' + cat.line : ''),
+          r.business_pct, RV_UTIL.deductible(r).toFixed(2), r.payment_method, r.payment_ref,
+          r.notes, r.notes_en,
+          (r.splits && r.splits.length) ? JSON.stringify(r.splits) : '',
+          (r._files || []).join('; '),
+          r.created_at,
+        ].map(RV_UTIL.csvCell).join(','));
+      });
+      // 엑셀이 한글을 깨뜨리지 않도록 BOM 을 붙인다
+      return '﻿' + out.join('\n');
+    }
+
+    function readme(ledger, rows, when, missing) {
+      var L = [];
+      L.push('ReceiptVault 백업 — ' + ledger.name);
+      L.push('만든 날: ' + when.toISOString().slice(0, 16).replace('T', ' '));
+      L.push('영수증 ' + rows.length + '건');
+      L.push('');
+      L.push('■ 이 폴더에 뭐가 있나');
+      L.push('  photos/       영수증 사진 원본. 파일 이름이 "날짜 가맹점" 이라 앱 없이도 찾을 수 있어.');
+      L.push('                한 거래에 종이가 여러 장이면 뒤에 -1, -2 가 붙어. -1 이 정산에 쓴 장이야.');
+      L.push('  receipts.csv  전체 표. 엑셀·구글시트에서 바로 열려. 세무사에게 이것만 줘도 돼.');
+      L.push('  receipts.json 앱에 되돌릴 때 쓰는 원본 값. 사람이 읽을 건 아니야.');
+      L.push('');
+      L.push('■ 왜 필요한가');
+      L.push('  영수증 원본(종이)을 버려도 이 사진이 증빙이 돼. 그러니 이 폴더가 사라지면');
+      L.push('  증빙도 같이 사라져. 앱 서버 하나에만 두지 말고 여기 파일을 따로 보관해.');
+      L.push('  클라우드(구글 드라이브 등) 한 곳 + 다른 한 곳, 이렇게 두 군데면 충분해.');
+      L.push('');
+      L.push('■ 얼마나 오래 두나');
+      L.push('  사업 경비: 신고한 해로부터 최소 3년 (미국 국세청 기본 기준).');
+      L.push('  집 공사비(cost basis): 그 집을 판 뒤 3년까지. 사실상 집을 갖고 있는 내내야.');
+      L.push('');
+      if (missing && missing.length) {
+        L.push('■ 주의 — 못 받은 사진 ' + missing.length + '장');
+        L.push('  아래 영수증의 사진을 내려받지 못했어. 인터넷이 끊겼거나 파일이 지워진 경우야.');
+        L.push('  앱에서 다시 백업을 받아 이 목록이 비는지 확인해줘.');
+        missing.forEach(function (m) { L.push('  - ' + m); });
+        L.push('');
+      }
+      L.push('만든 앱: ReceiptVault (https://jennyryu3d.github.io/receiptvault/)');
+      return L.join('\n');
+    }
+
+    // rows 를 받아 zip Blob 을 만든다.
+    // onStep(done, total, label) 로 진행 상황을 알린다 — 폰에서는 몇십 초 걸린다.
+    async function build(ledger, rows, onStep) {
+      var when = new Date();
+      var files = [];
+      var missing = [];
+      var bytes = 0;
+      var LIMIT = 1200 * 1024 * 1024;   // 폰 메모리가 감당할 만한 선
+
+      // 사진마다 이름이 겹치지 않게 세어 둔다 (같은 날 같은 가게가 둘일 수 있다)
+      var used = {};
+      var jobs = [];
+      rows.forEach(function (r) {
+        var paths = RV_DB.imagePaths(r);
+        r._files = [];
+        if (!paths.length) return;
+        // 이름은 영수증마다 하나. 같은 거래의 사진들은 뒤의 -1, -2 로만 갈린다.
+        // (겹침 번호를 사진마다 매기면 한 거래가 여러 거래처럼 보인다.)
+        var base = (r.purchased_at || '날짜없음') + ' ' + safeName(r.merchant || '가맹점없음');
+        var n = (used[base] = (used[base] || 0) + 1);
+        var stem = base + (n > 1 ? ' (' + n + ')' : '');
+        paths.forEach(function (p, i) {
+          var name = 'photos/' + stem + (paths.length > 1 ? '-' + (i + 1) : '') + '.jpg';
+          r._files.push(name.slice(7));
+          jobs.push({ path: p, name: name, label: r.merchant || r.purchased_at });
+        });
+      });
+
+      for (var i = 0; i < jobs.length; i++) {
+        var j = jobs[i];
+        if (onStep) onStep(i, jobs.length, j.label);
+        try {
+          var url = await RV_DB.imageUrl(j.path);
+          if (!url) throw new Error('링크를 못 받았어');
+          var res = await fetch(url);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          var buf = new Uint8Array(await res.arrayBuffer());
+          bytes += buf.length;
+          if (bytes > LIMIT) {
+            throw new Error('BACKUP_TOO_BIG');
+          }
+          files.push({ name: j.name, data: buf, date: when });
+        } catch (ex) {
+          if (ex && ex.message === 'BACKUP_TOO_BIG') throw ex;
+          // 한 장이 실패했다고 백업 전체를 버리면 아무것도 안 남는다.
+          // 대신 뭐가 빠졌는지 README 에 적어 둔다.
+          missing.push(j.name.slice(7) + '  (' + (ex && ex.message || ex) + ')');
+        }
+      }
+      if (onStep) onStep(jobs.length, jobs.length, '파일 묶는 중');
+
+      var enc = new TextEncoder();
+      files.push({ name: 'README.txt', data: enc.encode(readme(ledger, rows, when, missing)), date: when });
+      files.push({ name: 'receipts.csv', data: enc.encode(csvOf(rows, ledger)), date: when });
+      files.push({
+        name: 'receipts.json',
+        data: enc.encode(JSON.stringify({
+          app: 'ReceiptVault', made_at: when.toISOString(),
+          ledger: { id: ledger.id, name: ledger.name, kind: ledger.kind, cat_set: ledger.cat_set },
+          receipts: rows,
+        }, null, 2)),
+        date: when,
+      });
+
+      return { blob: RV_ZIP.make(files, when), missing: missing, photos: jobs.length - missing.length };
+    }
+
+    return { build: build, csvOf: csvOf, safeName: safeName };
+  })();
+
   window.RV_APP = RV_APP;
   window.RV_UTIL = RV_UTIL;
   window.RV_DB = RV_DB;
   window.RV_AI = RV_AI;
+  window.RV_ZIP = RV_ZIP;
+  window.RV_BACKUP = RV_BACKUP;
 })();

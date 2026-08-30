@@ -77,6 +77,7 @@ window.RV_T = {
   hardRefresh:   { en: 'Force Refresh',  ko: '강제 갱신' },
   diagnostics:   { en: 'Diagnostics',    ko: '연결 상태' },
   dataPrivacy:   { en: 'Data & Privacy', ko: '데이터와 개인정보' },
+  backup:        { en: 'Backup',         ko: '백업' },
   account:       { en: 'Account',        ko: '계정' },
 
   // --- 장부 종류 ---
