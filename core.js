@@ -1051,7 +1051,7 @@
 
     function readme(ledger, rows, when, missing) {
       var L = [];
-      L.push('ReceiptVault 백업 — ' + ledger.name);
+      L.push('ReceiptVault 백업 (backup) — ' + ledger.name);
       L.push('만든 날: ' + when.toISOString().slice(0, 16).replace('T', ' '));
       L.push('영수증 ' + rows.length + '건');
       L.push('');

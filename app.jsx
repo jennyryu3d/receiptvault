@@ -2480,7 +2480,9 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
       // 드라이브에서 덮어쓰기가 되고, 사진이 몇 겹씩 쌓이지 않는다.
       const a = document.createElement('a');
       a.href = URL.createObjectURL(got.blob);
-      a.download = 'ReceiptVault-' + window.RV_BACKUP.safeName(ledger.name) +
+      // 압축을 풀면 zip 이름 그대로 폴더가 생긴다. 그러니 zip 이름이 곧 폴더 이름이고,
+      // 드라이브에서 훑을 때 이게 뭔지 한눈에 보여야 한다.
+      a.download = 'ReceiptVault-backup-' + window.RV_BACKUP.safeName(ledger.name) +
                    '-' + (bkYear || '전체') + '.zip';
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 60000);
@@ -2684,8 +2686,11 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
         )}
 
         <p className="rv-muted rv-small">
-          <strong>연도마다 파일 하나야.</strong> 이름에 날짜를 안 붙여서 다시 받으면 같은 이름이
-          나와 — 드라이브에서 <strong>덮어쓰기</strong>를 고르면 사진이 겹겹이 쌓이지 않아.
+          <strong>연도마다 파일 하나야.</strong> 이름은{' '}
+          <code className="rv-code">ReceiptVault-backup-{ledger.name}-{bkYear || '전체'}.zip</code>{' '}
+          — 압축을 풀면 이 이름 그대로 폴더가 생겨.
+          날짜를 안 붙여서 다시 받으면 같은 이름이 나와 —
+          드라이브에서 <strong>덮어쓰기</strong>를 고르면 사진이 겹겹이 쌓이지 않아.
           지난 연도는 신고가 끝나면 더 안 바뀌니까 <strong>한 번만 받으면 끝</strong>이고,
           올해 것만 가끔 갈아끼우면 돼.
         </p>
