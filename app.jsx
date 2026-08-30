@@ -376,6 +376,138 @@ const BLANK = {
   splits: [],
 };
 
+// ---- 앱 안에서 바로 찍는 카메라 ----
+//
+// 폰의 카메라 앱을 부르는 <input capture> 는 안드로이드에서 우리 화면을 통째로
+// 죽여버린다 ("찍고 왔는데 아무 일도 안 일어나"의 진짜 원인). 여기서는 화면을
+// 떠나지 않는다 — 영상만 받아서 캔버스에 한 장 떠낸다. 앱이 죽을 일이 없다.
+//
+// 찍고 나면 바로 쓰지 않고 한 번 보여준다. 흐리게 찍힌 사진을 그대로 AI에
+// 보내면 하루 인식 한도만 축나기 때문이다.
+function InAppCamera({ onShot, onCancel, onFail }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [err, setErr] = useState('');
+  const [shot, setShot] = useState(null);      // { blob, url }
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const md = navigator.mediaDevices;
+    if (!md || !md.getUserMedia) {
+      setErr('이 브라우저에서는 앱 안 촬영이 안 돼.');
+      return;
+    }
+    // 뒷면 카메라를, 되도록 크게. 영수증은 잔글씨라 해상도가 곧 인식률이다.
+    md.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 2560 }, height: { ideal: 1440 },
+      },
+      audio: false,
+    }).then(
+      (stream) => {
+        if (!alive) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+        setReady(true);
+      },
+      (ex) => {
+        if (!alive) return;
+        const n = ex && ex.name;
+        setErr(
+          n === 'NotAllowedError'
+            ? '카메라 권한이 막혀 있어. 주소창 왼쪽 자물쇠 → 권한 → 카메라를 허용으로 바꿔줘.'
+            : n === 'NotFoundError' ? '카메라를 찾지 못했어.'
+            : '카메라를 열지 못했어 (' + (n || ex) + ').'
+        );
+      }
+    );
+    return () => {
+      alive = false;
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  // 찍은 사진을 보다가 "다시 찍기" 를 누르면 <video> 가 새로 만들어진다.
+  // 그때 영상을 다시 물려주지 않으면 까만 화면만 남는다.
+  useEffect(() => {
+    if (shot || !streamRef.current || !videoRef.current) return;
+    videoRef.current.srcObject = streamRef.current;
+    videoRef.current.play().catch(() => {});
+  }, [shot]);
+
+  function stop() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  }
+
+  function take() {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement('canvas');
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    c.toBlob((b) => {
+      if (!b) { setErr('사진을 만들지 못했어. 다시 눌러줄래?'); return; }
+      setShot({ blob: b, url: URL.createObjectURL(b) });
+    }, 'image/jpeg', 0.92);
+  }
+
+  function retake() {
+    if (shot) URL.revokeObjectURL(shot.url);
+    setShot(null);
+  }
+
+  function use() {
+    const b = shot.blob;
+    stop();
+    URL.revokeObjectURL(shot.url);
+    onShot(new File([b], 'receipt.jpg', { type: 'image/jpeg' }));
+  }
+
+  return (
+    <div className="rv-cam">
+      {err ? (
+        <div className="rv-cam-err">
+          <p>{err}</p>
+          <button className="rv-btn" onClick={() => { stop(); onFail(); }}>
+            폰 카메라 앱으로 찍기
+          </button>
+          <button className="rv-btn-ghost" onClick={() => { stop(); onCancel(); }}>닫기</button>
+        </div>
+      ) : shot ? (
+        <>
+          <img className="rv-cam-view" src={shot.url} alt="" />
+          <div className="rv-cam-bar">
+            <button className="rv-cam-side" onClick={retake}>다시 찍기</button>
+            <button className="rv-cam-ok" onClick={use}>이걸로 ✓</button>
+          </div>
+          <p className="rv-cam-hint">글씨가 읽히는지 보고 넘겨. 흐리면 다시 찍는 게 빨라.</p>
+        </>
+      ) : (
+        <>
+          <video className="rv-cam-view" ref={videoRef} playsInline muted autoPlay />
+          <div className="rv-cam-bar">
+            <button className="rv-cam-side" onClick={() => { stop(); onCancel(); }}>닫기</button>
+            <button className="rv-cam-shutter" onClick={take} disabled={!ready}
+                    aria-label="촬영" />
+            <span className="rv-cam-side" />
+          </div>
+          <p className="rv-cam-hint">
+            {ready ? '영수증 전체가 화면에 들어오게 맞춰줘. 길면 세로로.' : '카메라 켜는 중...'}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }) {
   const ledgerId = ledger.id;
   const P = window.RV_KIND(ledger.kind);      // 장부 종류가 화면을 정한다
@@ -426,12 +558,21 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     } catch (e) { return false; }
   });
 
-  const [blob, setBlob] = useState(null);        // 새로 고른 이미지
-  const [preview, setPreview] = useState(null);  // 화면에 보여줄 URL
+  // 사진은 여러 장이 될 수 있다. 손으로 쓴 명세가 두세 장이고 카드 전표가 따로
+  // 붙는 거래가 실제로 있다 — 그때 한 장만 남기면 증빙이 반쪽이 된다.
+  // 첫 장이 대표: AI가 읽는 것도, 목록·PDF에 나오는 것도 이 장이다.
+  // [{ key, path?, url, blob? }]  path 가 있으면 이미 올라간 사진.
+  const [photos, setPhotos] = useState([]);
+  const [bigPhoto, setBigPhoto] = useState(null);   // 크게 보기
+  const keySeq = useRef(0);
+  const origPaths = useRef([]);                     // 열었을 때 붙어 있던 사진들
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
+  // 잘못된 게 아니라 그냥 알려주는 말 (붉은 오류 색으로 띄우면 안 된다)
+  const [note, setNote] = useState('');
   // 카메라에서 돌아오는 사이 앱이 다시 시작됐을 때 보여줄 안내
   const [cameraLost, setCameraLost] = useState(false);
+  const [camOpen, setCamOpen] = useState(false);   // 앱 안 카메라가 떠 있는지
   const fileRef = useRef(null);
   const cameraRef = useRef(null);
 
@@ -457,19 +598,44 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
   }
 
-  // 카메라를 열기 직전에 흔적을 남긴다
-  function openCamera() {
+  // 폰 카메라 앱으로 넘어가기 직전에 흔적을 남긴다.
+  // 이제는 앱 안 카메라가 안 될 때만 여기로 온다.
+  function openPhoneCamera() {
     try { localStorage.setItem(CAM_KEY, String(Date.now())); } catch (e) {}
     cameraRef.current.click();
   }
 
+  // 앱 안 카메라로 찍은 사진은 파일 고르기와 똑같은 길로 보낸다
+  async function shotTaken(file) {
+    setCamOpen(false);
+    await handleImage(file, 'photo');
+  }
+
+  // 수정하려고 연 영수증에 이미 붙어 있는 사진들을 불러온다
   useEffect(() => {
     let alive = true;
-    if (initial && initial.image_path) {
-      DB.imageUrl(initial.image_path).then((u) => { if (alive) setPreview(u); });
-    }
+    const paths = DB.imagePaths(initial);
+    if (!paths.length) return;
+    origPaths.current = paths;
+    Promise.all(paths.map((p) => DB.imageUrl(p))).then((urls) => {
+      if (!alive) return;
+      setPhotos(paths.map((p, i) => ({ key: 'old' + i, path: p, url: urls[i] })));
+    });
     return () => { alive = false; };
-  }, [initial && initial.image_path]);
+  }, [initial && initial.id]);
+
+  function addPhoto(blob) {
+    const p = { key: 'new' + (++keySeq.current), blob: blob, url: URL.createObjectURL(blob) };
+    setPhotos((list) => list.concat([p]));
+    return p;
+  }
+  function dropPhoto(i) {
+    setPhotos((list) => list.filter((_, n) => n !== i));
+  }
+  // 대표를 바꾼다 = 그 장을 맨 앞으로. 금액이 인쇄된 장을 대표로 두면 대조가 쉽다.
+  function makeMain(i) {
+    setPhotos((list) => [list[i]].concat(list.filter((_, n) => n !== i)));
+  }
 
   function set(k, v) { setRec((r) => Object.assign({}, r, { [k]: v })); }
 
@@ -633,20 +799,24 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!file) return;
+    await handleImage(file, source);
+  }
 
-    setErr(''); setBusy('이미지 정리하는 중...');
+  // 사진 한 장이 들어왔을 때 하는 일. 앱 안 카메라도, 갤러리도 여기로 모인다.
+  async function handleImage(file, source) {
+    setErr(''); setNote(''); setBusy('이미지 정리하는 중...');
     setCameraLost(false);
     try { localStorage.removeItem(CAM_KEY); } catch (ex2) {}
 
     // 사진 준비와 AI 인식을 분리한다.
     // 예전에는 한 덩어리라서 인식이 실패하면 사진까지 같이 날아갔다 —
     // 사진은 증빙이라 인식이 안 되더라도 반드시 남아야 한다.
+    const first = photos.length === 0;
     let small;
     try {
       small = await U.compressImage(file);
-      setBlob(small);
-      setPreview(URL.createObjectURL(small));
-      set('source', source);
+      addPhoto(small);
+      if (first) set('source', source);
     } catch (ex) {
       AI.trace('사진 처리 실패', { error: String(ex && ex.message || ex) });
       setBusy('');
@@ -654,19 +824,17 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
       return;
     }
 
-    if (!AI.available()) {
+    // 둘째 장부터는 증빙으로만 붙인다. 손글씨 명세 같은 건 AI에 보내봐야
+    // 틀린 금액만 받게 되고, 하루 한도도 장수만큼 나간다.
+    if (!first) {
       setBusy('');
-      setErr('자동 인식이 연결돼 있지 않아. 사진은 저장되니 항목만 직접 넣어줘.');
+      setNote('「증빙 ' + photos.length + '」로 붙였어. 금액은 대표(첫 장)에서만 읽어.');
       return;
     }
 
-    // 이미 AI가 읽어놓은 내용이 있으면 다시 부르지 않는다.
-    // (앱이 한 번 죽었다 살아난 뒤 사진만 다시 붙이는 경우가 이렇다.
-    //  그때 또 부르면 하루 한도만 축난다.)
-    if (rec.ai_raw) {
+    if (!AI.available()) {
       setBusy('');
-      setErr('사진을 붙였어. 이미 읽어둔 내용이 있어서 인식은 건너뛰었어 — ' +
-             '다시 읽히려면 아래 "다시 인식" 을 눌러줘.');
+      setErr('자동 인식이 연결돼 있지 않아. 사진은 저장되니 항목만 직접 넣어줘.');
       return;
     }
 
@@ -731,10 +899,22 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     }
   }
 
-  function redoExtract() {
-    if (!blob) return;
+  // 대표 사진을 다시 읽힌다. 이미 저장된 영수증이면 사진이 손에 없으니 받아온다.
+  async function redoExtract() {
+    const main = photos[0];
+    if (!main) return;
     setRec((r) => Object.assign({}, r, { ai_raw: null }));
-    runExtract(blob, rec.source);
+    let b = main.blob;
+    if (!b) {
+      setBusy('사진 가져오는 중...');
+      try {
+        b = await (await fetch(main.url)).blob();
+      } catch (ex) {
+        setBusy('');
+        return setErr('사진을 가져오지 못했어. 잠깐 뒤에 다시 눌러줄래?');
+      }
+    }
+    await runExtract(b, rec.source);
   }
 
   async function save() {
@@ -764,10 +944,10 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
     try {
       const saved = await DB.save(Object.assign({}, rec, { needs_review: false }), ledgerId, session);
 
-      if (blob) {
-        setBusy('사진 올리는 중...');
+      if (photos.length || origPaths.current.length) {
+        setBusy(photos.length > 1 ? '사진 ' + photos.length + '장 올리는 중...' : '사진 올리는 중...');
         try {
-          await DB.uploadImage(ledgerId, saved.id, blob);
+          await DB.saveImages(ledgerId, saved.id, photos, origPaths.current);
         } catch (imgEx) {
           // 영수증 자체는 이미 저장됐다. 사진만 실패한 걸로 전체를 되돌리면
           // 방금 입력한 내용을 다시 치게 만드는 셈이라 더 나쁘다.
@@ -804,6 +984,18 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
   // 0% 분류(개인 용품)까지 걸리면 엉뚱하게 "식비는 50%" 가 뜬다.
   const halfOnly = U.lines(calcBase).some((l) => l.cat.deduct > 0 && l.cat.deduct < 1);
 
+  // 카메라가 떠 있는 동안은 카메라만 보여준다.
+  // (폼을 지우는 게 아니라 잠깐 가리는 것 — 쓰던 내용은 그대로 살아 있다.)
+  if (camOpen) {
+    return (
+      <InAppCamera
+        onShot={shotTaken}
+        onCancel={() => setCamOpen(false)}
+        onFail={() => { setCamOpen(false); openPhoneCamera(); }}
+      />
+    );
+  }
+
   return (
     <div className="rv-screen">
       <div className="rv-topbar">
@@ -822,17 +1014,20 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
       {/* 화면 아래에 붙는 알림.
           예전에는 폼 맨 위에 띄웠는데, 저장 버튼은 맨 아래에 있어서
           메시지가 화면 밖에 있었다. 눌러도 아무 일 없는 것처럼 보이는 원인이었다. */}
-      {(busy || err) && (
-        <div className={'rv-fixed-note ' + (err ? 'rv-fixed-err' : 'rv-fixed-busy')}>
-          <div>{err || busy}</div>
+      {(busy || err || note) && (
+        <div className={'rv-fixed-note ' +
+             (err ? 'rv-fixed-err' : note && !busy ? 'rv-fixed-info' : 'rv-fixed-busy')}>
+          <div>{err || busy || note}</div>
           {err && <button className="rv-banner-x" onClick={() => setErr('')}>✕</button>}
+          {!err && !busy && note &&
+            <button className="rv-banner-x" onClick={() => setNote('')}>✕</button>}
         </div>
       )}
 
       <div className="rv-body">
         {/* 카메라에 다녀오는 사이 앱이 다시 시작된 경우.
             사진은 이미 폰 갤러리에 저장돼 있으니 그쪽으로 안내한다. */}
-        {cameraLost && !preview && (
+        {cameraLost && !photos.length && (
           <Banner kind="warn" onClose={() => setCameraLost(false)}>
             사진을 찍고 돌아오는 사이 앱이 다시 시작됐어. 안드로이드가 카메라를 띄우면서
             앱을 잠깐 종료해버린 거야 — 사진은 <strong>폰 갤러리에 그대로 저장돼 있어.</strong>
@@ -861,8 +1056,8 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
         )}
 
         <div className="rv-photo-row">
-          <button className="rv-btn-ghost rv-grow" onClick={openCamera}>
-            📷 <L k="takePhoto" />
+          <button className="rv-btn-ghost rv-grow" onClick={() => { setErr(''); setCamOpen(true); }}>
+            📷 {photos.length ? '사진 더 찍기' : <L k="takePhoto" />}
           </button>
           <button className="rv-btn-ghost rv-grow" onClick={() => fileRef.current.click()}>
             🖼 <L k="fromGallery" />
@@ -872,15 +1067,17 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
                hidden onChange={(e) => pickImage(e, 'photo')} />
         <input ref={fileRef} type="file" accept="image/*"
                hidden onChange={(e) => pickImage(e, 'screenshot')} />
-        {rec.ai_raw && (
+        {rec.ai_raw && photos.length > 0 && (
           <button className="rv-btn-ghost rv-wide-sm" disabled={!!busy}
-                  onClick={() => { if (blob) redoExtract(); else fileRef.current.click(); }}>
-            🔄 다시 인식
+                  onClick={redoExtract}>
+            🔄 대표 사진 다시 인식
           </button>
         )}
         <p className="rv-muted rv-small">
-          촬영 후 화면이 처음으로 돌아가면 폰이 앱을 잠깐 껐던 거야.
-          그럴 땐 <strong>갤러리</strong>로 방금 찍은 사진을 고르면 돼 — 쓰던 내용은 남아 있어.
+          촬영은 앱 안에서 바로 돼. 화면이 안 떠나니까 쓰던 내용도 그대로야.
+          <strong> 한 거래에 종이가 여러 장이면 다 붙여</strong> — 손으로 쓴 명세 여러 장에
+          카드 전표가 따로 붙는 거래가 그렇다. <strong>금액이 인쇄된 장을 대표로</strong> 두면
+          되고, 나머지는 증빙으로 그대로 남아. AI는 대표 한 장만 읽어.
         </p>
 
         {!AI.available() && (
@@ -889,9 +1086,36 @@ function ReceiptForm({ initial, ledger, paymentRefs, session, onDone, onCancel }
           </p>
         )}
 
-        {preview && (
-          <div className="rv-preview">
-            <img src={preview} alt="영수증" />
+        {photos.length > 0 && (
+          <>
+            <div className="rv-photos">
+              {photos.map((p, i) => (
+                <div key={p.key} className={'rv-photo' + (i === 0 ? ' rv-photo-main' : '')}>
+                  <img src={p.url} alt={i === 0 ? '대표 사진' : '증빙 사진 ' + i}
+                       onClick={() => setBigPhoto(p)} />
+                  <span className="rv-photo-tag">{i === 0 ? '대표 · 정산' : '증빙 ' + i}</span>
+                  <div className="rv-photo-acts">
+                    {i > 0 && (
+                      <button className="rv-photo-btn" onClick={() => makeMain(i)}>대표로</button>
+                    )}
+                    <button className="rv-photo-btn" onClick={() => dropPhoto(i)}>빼기</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="rv-muted rv-small">
+              {photos.length === 1
+                ? '사진을 누르면 크게 볼 수 있어. 종이가 더 있으면 계속 붙여도 돼.'
+                : '사진 ' + photos.length + '장이 이 영수증 하나에 같이 저장돼. ' +
+                  '순서를 바꾸려면 「대표로」를 눌러 — 맨 앞 장이 세무사가 먼저 보는 장이야.'}
+            </p>
+          </>
+        )}
+
+        {bigPhoto && (
+          <div className="rv-lightbox" onClick={() => setBigPhoto(null)}>
+            <img src={bigPhoto.url} alt="영수증" />
+            <button className="rv-lightbox-x" onClick={() => setBigPhoto(null)}>닫기 ✕</button>
           </div>
         )}
 
@@ -1316,7 +1540,11 @@ function ReceiptList({ rows, loading, onOpen, onAdd, year, years, onYear, canWri
                           ⑂{r.splits.length}
                         </span>
                       )}
-                      {r.image_path && <span className="rv-clip" title="사진 있음">📎</span>}
+                      {r.image_path && (
+                        <span className="rv-clip" title="사진 있음">
+                          📎{(r.extra_paths || []).length ? (r.extra_paths.length + 1) : ''}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="rv-item-amt">
@@ -1652,7 +1880,11 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
             [l.note, en(r, 'notes')].filter(Boolean).join(' / '),
             nameFor(r.created_by),
             r.created_at ? String(r.created_at).slice(0, 10) : '',
-            r.image_path ? 'on file' : '',
+            // 종이가 여러 장인 거래는 몇 장인지 적어준다 — 세무사가 첨부를 셀 수 있게
+            r.image_path
+              ? ((r.extra_paths || []).length
+                  ? 'on file (' + ((r.extra_paths.length) + 1) + ' images)' : 'on file')
+              : '',
           ]);
         out.push(row.map(U.csvCell).join(','));
       });
@@ -1938,7 +2170,8 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
 // =================================================================
 
 function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
-  const [url, setUrl] = useState(null);
+  const [urls, setUrls] = useState([]);
+  const [big, setBig] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const c = window.RV_CAT(rec.category);
   const P = window.RV_KIND(ledger.kind);
@@ -1948,11 +2181,16 @@ function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
     (P.lineLabel && cc.line ? P.lineLabel + ' ' + cc.line + '번 · ' : '') +
     (cc.deduct === 0 ? '공제에서 빠짐 · ' : '') + cc.en);
 
+  // 붙어 있는 사진 전부. 대표가 먼저다.
   useEffect(() => {
     let alive = true;
-    if (rec.image_path) DB.imageUrl(rec.image_path).then((u) => { if (alive) setUrl(u); });
+    const paths = DB.imagePaths(rec);
+    if (!paths.length) { setUrls([]); return; }
+    Promise.all(paths.map((p) => DB.imageUrl(p))).then((got) => {
+      if (alive) setUrls(got.filter(Boolean));
+    });
     return () => { alive = false; };
-  }, [rec.image_path]);
+  }, [rec.id, rec.image_path, (rec.extra_paths || []).join('|')]);
 
   const enteredBy = members.find((m) => m.user_id === rec.created_by);
 
@@ -2026,7 +2264,33 @@ function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
           : <Banner kind="warn">
               {P.form.purposeMissing}
             </Banner>}
-        {url && <div className="rv-preview"><img src={url} alt="영수증" /></div>}
+        {urls.length > 0 && (
+          <>
+            <div className="rv-photos">
+              {urls.map((u, i) => (
+                <div key={u} className={'rv-photo' + (i === 0 ? ' rv-photo-main' : '')}>
+                  <img src={u} alt={i === 0 ? '대표 사진' : '증빙 사진 ' + i}
+                       onClick={() => setBig(u)} />
+                  {urls.length > 1 && (
+                    <span className="rv-photo-tag">{i === 0 ? '대표 · 정산' : '증빙 ' + i}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            {urls.length > 1 && (
+              <p className="rv-muted rv-small">
+                이 거래의 증빙 {urls.length}장. 눌러서 크게 볼 수 있어.
+              </p>
+            )}
+          </>
+        )}
+
+        {big && (
+          <div className="rv-lightbox" onClick={() => setBig(null)}>
+            <img src={big} alt="영수증" />
+            <button className="rv-lightbox-x" onClick={() => setBig(null)}>닫기 ✕</button>
+          </div>
+        )}
 
         {canWrite && (confirming ? (
           <div className="rv-confirm">

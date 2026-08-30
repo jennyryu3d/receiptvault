@@ -142,7 +142,21 @@ function buildPrompt(categories, countries, today, kind) {
     '  statement later. Receipts usually print the brand and the last four digits — return',
     '  them as e.g. "Visa ...4821", "Amex ...1007", "Cash". NEVER return a full card number:',
     '  if more than four digits are visible, keep only the last four. Null if not shown.',
-    '- Never invent a value. Use null when the receipt does not show it.',
+    // 손으로 쓴 명세 여러 장에 카드 전표 한 장이 붙는 거래가 실제로 있다.
+    // 그때 모델이 손글씨를 억지로 합산하면 총액이 조용히 틀린다.
+    // 인쇄된 결제 총액을 이기는 근거는 없다 — 그걸 쓰라고 못 박는다.
+    '- One photo may show SEVERAL pieces of paper for the same purchase — often two or',
+    '  three handwritten itemised sheets plus one small printed card slip. In that case:',
+    '  take "amount" from the PRINTED slip (the machine-printed charged total). Never sum',
+    '  handwritten figures yourself, and never let a handwritten subtotal override a',
+    '  printed charged total. Take the merchant, date and payment_ref from whichever',
+    '  sheet shows them most clearly.',
+    '- Handwriting: read it only where you are confident. If the item lines are',
+    '  handwritten and you cannot read the amounts reliably, return "splits": null and',
+    '  leave the single best category — a wrong split is worse than no split.',
+    '- Never invent a value. Use null when the receipt does not show it. Returning null',
+    '  is always better than a plausible guess: the owner checks every field anyway,',
+    '  but a confident wrong number gets saved unnoticed.',
     '- Output raw JSON only. No markdown fences, no commentary.',
   ].join('\n');
 }

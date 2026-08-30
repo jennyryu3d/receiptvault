@@ -160,7 +160,11 @@ create table if not exists public.receipts (
   notes         text,
   source        text not null default 'manual'
                 check (source in ('manual','photo','screenshot')),
+  -- 대표 사진 = AI가 읽고, 목록·PDF에 나오는 장.
+  -- 한 거래에 종이가 여러 장인 경우(손으로 쓴 명세 여러 장 + 카드 전표)가 있어서
+  -- 나머지 증빙은 extra_paths 에 순서대로 들어간다.
   image_path    text,
+  extra_paths   text[] not null default '{}',
   ai_raw        jsonb,
   needs_review  boolean not null default false,
 

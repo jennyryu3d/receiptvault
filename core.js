@@ -543,24 +543,51 @@
 
     remove: async function (rec) {
       var c = need();
-      if (rec.image_path) {
-        // 사진이 남아 저장소를 먹지 않도록 먼저 지운다. 실패해도 행 삭제는 진행.
-        try { await c.storage.from('receipts').remove([rec.image_path]); } catch (e) {}
+      // 사진이 남아 저장소를 먹지 않도록 먼저 지운다. 실패해도 행 삭제는 진행.
+      var paths = RV_DB.imagePaths(rec);
+      if (paths.length) {
+        try { await c.storage.from('receipts').remove(paths); } catch (e) {}
       }
       var res = await c.from('receipts').delete().eq('id', rec.id);
       if (res.error) throw res.error;
     },
 
     // ---- 사진 ----
-    uploadImage: async function (ledgerId, receiptId, blob) {
-      var c = need();
-      // 경로 규칙이 곧 보안 규칙이다. 첫 폴더가 장부 id 라서 식구끼리는 서로 보인다.
-      var path = ledgerId + '/' + receiptId + '.jpg';
-      var up = await c.storage.from('receipts')
-                 .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
-      if (up.error) throw up.error;
 
-      var res = await c.from('receipts').update({ image_path: path })
+    // 한 영수증에 붙은 사진 전부. 대표가 먼저 온다.
+    imagePaths: function (rec) {
+      if (!rec) return [];
+      var out = [];
+      if (rec.image_path) out.push(rec.image_path);
+      (rec.extra_paths || []).forEach(function (p) { if (p) out.push(p); });
+      return out;
+    },
+
+    // 사진 목록을 통째로 저장한다.
+    // items: 화면에 보이는 순서대로 [{ path } (이미 올라간 것) | { blob } (새 것)].
+    // 첫 장이 대표 — AI가 읽고 목록·PDF에 나오는 것도 이 장이다.
+    saveImages: async function (ledgerId, receiptId, items, oldPaths) {
+      var c = need();
+      var paths = [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].path) { paths.push(items[i].path); continue; }
+        // 경로 규칙이 곧 보안 규칙이다. 첫 폴더가 장부 id 라서 식구끼리는 서로 보인다.
+        // 뒤에 붙는 무작위 조각은 지웠다 다시 넣은 사진이 옛 사진을 덮어쓰지 않게 한다.
+        var path = ledgerId + '/' + receiptId + '-' +
+                   Date.now().toString(36) + i + '.jpg';
+        var up = await c.storage.from('receipts')
+                   .upload(path, items[i].blob, { contentType: 'image/jpeg', upsert: true });
+        if (up.error) throw up.error;
+        paths.push(path);
+      }
+
+      // 화면에서 뺀 사진은 저장소에서도 치운다. 실패해도 표 갱신은 진행한다 —
+      // 표가 진짜다. 저장소에 남은 파일은 아무도 못 보는 쓰레기일 뿐이다.
+      var gone = (oldPaths || []).filter(function (p) { return paths.indexOf(p) < 0; });
+      if (gone.length) { try { await c.storage.from('receipts').remove(gone); } catch (e) {} }
+
+      var res = await c.from('receipts')
+                  .update({ image_path: paths[0] || null, extra_paths: paths.slice(1) })
                   .eq('id', receiptId).select().single();
       if (res.error) throw res.error;
       return res.data;
