@@ -499,6 +499,32 @@
       };
     },
 
+    // 연도별로 몇 건·사진 몇 장이고, 가장 최근에 들어온 게 언제인지.
+    // "지난 백업 뒤로 바뀐 게 있나" 를 이걸로 판단한다 — 안 바뀌었으면 안 받아도 되고,
+    // 그게 백업을 실제로 하게 만드는 가장 확실한 방법이다. 매번 받으라고 하면 안 받는다.
+    backupStats: async function (ledgerId) {
+      var c = supa(); if (!c || !ledgerId) return {};
+      var res = await c.from('receipts')
+                  .select('purchased_at, created_at, image_path, extra_paths')
+                  .eq('ledger_id', ledgerId);
+      if (res.error) return {};
+
+      var out = {};
+      function put(k, r) {
+        var e = out[k] || (out[k] = { n: 0, photos: 0, latest: '' });
+        e.n++;
+        e.photos += RV_DB.imagePaths(r).length;
+        var t = r.created_at || '';
+        if (t > e.latest) e.latest = t;
+      }
+      (res.data || []).forEach(function (r) {
+        var y = (r.purchased_at || '').slice(0, 4);
+        if (/^\d{4}$/.test(y)) put(y, r);
+        put('all', r);
+      });
+      return out;
+    },
+
     save: async function (rec, ledgerId, session) {
       var c = need();
       if (!ledgerId) throw new Error('장부가 선택되지 않았어요.');

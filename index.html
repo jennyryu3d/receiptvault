@@ -351,6 +351,25 @@
   .rv-cam-err{position:relative;z-index:1;max-width:340px;padding:24px;text-align:center;
               color:#fff;display:flex;flex-direction:column;gap:12px}
 
+  /* ---------- 백업 ---------- */
+  /* 지금 받아야 하는지를 색으로 먼저 말한다 */
+  .rv-bkstate{font-size:13px;margin:10px 0;padding:10px 12px;border-radius:10px;
+              border:1px solid var(--line);background:#221f1d;color:var(--ink)}
+  .rv-bkstate-ok{border-color:#3d5546;background:#1e2621;color:#bcd7c4}
+  .rv-bkstate-never,.rv-bkstate-stale{border-color:var(--tan-dim);background:#2a231a;color:#e8d5b5}
+  .rv-bkstate-empty{color:var(--muted)}
+
+  .rv-howto{margin:12px 0;border:1px solid var(--line);border-radius:10px;
+            background:#1e1c1b;padding:0 12px}
+  .rv-howto>summary{list-style:none;cursor:pointer;padding:12px 0;font-size:13px;
+                    color:var(--tan);display:flex;gap:8px;align-items:baseline}
+  .rv-howto>summary::-webkit-details-marker{display:none}
+  .rv-howto>summary::after{content:'▾';margin-left:auto;color:var(--muted)}
+  .rv-howto[open]>summary::after{content:'▴'}
+  .rv-howto-tag{font-size:11px;color:var(--muted);font-weight:400}
+  .rv-steps{margin:0 0 12px;padding-left:20px;font-size:13px;color:var(--ink);line-height:1.75}
+  .rv-steps li{margin-bottom:4px}
+
   /* ---------- 사진 여러 장 ----------
      한 거래에 종이가 여러 장일 수 있다. 가로로 넘겨 보게 두고,
      맨 앞 장(대표)만 테두리로 구분한다. */

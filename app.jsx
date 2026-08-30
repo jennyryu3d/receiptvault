@@ -2408,22 +2408,61 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
   // ---- 백업 ----
   // 사진을 한 장씩 받아 zip 으로 묶는다. 폰에서는 수십 초 걸릴 수 있어서
   // 몇 장째인지 계속 보여준다 — 멈춘 줄 알고 화면을 떠나면 처음부터 다시다.
+  //
+  // 파일은 연도마다 하나다. 매번 새 이름으로 받으면 드라이브에 같은 사진이
+  // 몇 겹씩 쌓인다. 지난 연도는 신고가 끝나면 안 바뀌니 한 번 받으면 끝이고,
+  // 올해 것만 가끔 갈아끼우면 된다.
   const [bk, setBk] = useState(null);            // { done, total, label }
   const [bkDone, setBkDone] = useState('');
-  const [bkYear, setBkYear] = useState('');
-  const [bkYears, setBkYears] = useState([]);
+  const [bkYear, setBkYear] = useState(String(new Date().getFullYear()));
+  const [stats, setStats] = useState({});
+  const [marks, setMarks] = useState({});        // 언제 무엇까지 받아뒀는지
+
+  const MARK_KEY = ledger ? 'rv_backup_' + ledger.id : '';
 
   useEffect(() => {
     let alive = true;
     if (!ledger) return;
-    DB.list({ ledgerId: ledger.id }).then((rows) => {
-      if (!alive) return;
-      const ys = Array.from(new Set(rows.map((r) => (r.purchased_at || '').slice(0, 4))
-                                        .filter(Boolean))).sort().reverse();
-      setBkYears(ys);
-    }, () => {});
+    DB.backupStats(ledger.id).then((s) => { if (alive) setStats(s); }, () => {});
+    try {
+      setMarks(JSON.parse(localStorage.getItem('rv_backup_' + ledger.id) || '{}'));
+    } catch (e) { setMarks({}); }
     return () => { alive = false; };
   }, [ledger && ledger.id]);
+
+  const bkYears = useMemo(
+    () => Object.keys(stats).filter((k) => k !== 'all').sort().reverse(), [stats]);
+
+  const cur = stats[bkYear || 'all'] || { n: 0, photos: 0, latest: '' };
+  const mark = marks[bkYear || 'all'];
+
+  // 지난 백업 뒤로 새로 들어온 게 있나
+  const bkState = useMemo(() => {
+    if (!cur.n) return { kind: 'empty', text: '이 범위에는 영수증이 없어.' };
+    const when = mark && mark.at ? mark.at.slice(5, 10).replace('-', '/') : '';
+    if (!mark) {
+      return { kind: 'never', text: '아직 한 번도 안 받았어. 지금 받아둬.' };
+    }
+    if (mark.latest >= cur.latest && mark.n === cur.n) {
+      return { kind: 'ok', text: when + '에 받았고 그 뒤로 바뀐 게 없어 — 다시 안 받아도 돼.' };
+    }
+    const added = Math.max(0, cur.n - (mark.n || 0));
+    return {
+      kind: 'stale',
+      text: when + ' 이후로 ' + (added ? '영수증 ' + added + '건이 늘었어.' : '내용이 바뀌었어.') +
+            ' 받아서 같은 이름 파일을 덮어써.',
+    };
+  }, [cur.n, cur.latest, mark]);
+
+  // 사진 한 장이 대략 200KB 남짓이다 (1600px, 품질 0.72). 정확할 필요는 없고
+  // "몇 초 걸리나 / 드라이브에 부담되나" 만 가늠되면 된다.
+  const bkSize = cur.photos ? Math.max(1, Math.round(cur.photos * 0.21)) : 0;
+
+  function bkLabel(k) {
+    const s = stats[k] || { n: 0 };
+    const name = k === 'all' ? '이 장부 전체' : k + '년';
+    return name + (s.n ? ' · ' + s.n + '건' : ' · 없음');
+  }
 
   async function runBackup() {
     setErr(''); setBkDone(''); setBk({ done: 0, total: 0, label: '' });
@@ -2437,13 +2476,21 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
         setBk({ done: done, total: total, label: label ? '사진: ' + label : '' });
       });
 
-      const tag = window.RV_BACKUP.safeName(ledger.name) + '-' + (bkYear || 'all') +
-                  '-' + new Date().toISOString().slice(0, 10);
+      // 이름에 오늘 날짜를 넣지 않는다. 같은 연도는 같은 파일이어야
+      // 드라이브에서 덮어쓰기가 되고, 사진이 몇 겹씩 쌓이지 않는다.
       const a = document.createElement('a');
       a.href = URL.createObjectURL(got.blob);
-      a.download = 'ReceiptVault-' + tag + '.zip';
+      a.download = 'ReceiptVault-' + window.RV_BACKUP.safeName(ledger.name) +
+                   '-' + (bkYear || '전체') + '.zip';
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+
+      // 어디까지 받아뒀는지 기록해 둔다 (이 폰에만 남는다)
+      const next = Object.assign({}, marks, {
+        [bkYear || 'all']: { at: new Date().toISOString(), n: rows.length, latest: cur.latest },
+      });
+      setMarks(next);
+      try { localStorage.setItem(MARK_KEY, JSON.stringify(next)); } catch (e) {}
 
       setBk(null);
       setBkDone(
@@ -2451,7 +2498,7 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
         (got.missing.length
           ? '다만 사진 ' + got.missing.length + '장을 못 받았어. zip 안 README.txt 에 목록이 있어 — ' +
             '인터넷이 끊겼던 거면 다시 한 번 받아줘.'
-          : '폰의 다운로드 폴더에 있어. 구글 드라이브 같은 데 한 부 더 올려둬.')
+          : '다운로드 폴더에 있어.')
       );
     } catch (ex) {
       setBk(null);
@@ -2612,23 +2659,53 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
           <label className="rv-label rv-grow">받을 범위
             <select className="rv-input" value={bkYear}
                     onChange={(e) => setBkYear(e.target.value)}>
-              <option value="">이 장부 전체</option>
-              {bkYears.map((y) => <option key={y} value={y}>{y}년</option>)}
+              {bkYears.map((y) => <option key={y} value={y}>{bkLabel(y)}</option>)}
+              <option value="">{bkLabel('all')}</option>
             </select>
           </label>
         </div>
-        <button className="rv-btn rv-wide-sm" disabled={!!bk} onClick={runBackup}>
-          {bk ? (bk.total ? '내려받는 중 ' + bk.done + ' / ' + bk.total : '준비 중...') : '⬇ 백업 파일 만들기'}
+
+        {/* 지금 받아야 하는지 아닌지를 먼저 말해준다.
+            매번 받으라고만 하면 결국 안 받게 된다. */}
+        <p className={'rv-bkstate rv-bkstate-' + bkState.kind}>
+          {bkState.kind === 'ok' ? '✓ ' : bkState.kind === 'empty' ? '' : '● '}
+          {bkState.text}
+          {cur.photos > 0 && bkState.kind !== 'empty' &&
+            ' (사진 ' + cur.photos + '장 · 약 ' + bkSize + 'MB)'}
+        </p>
+
+        <button className="rv-btn rv-wide-sm" disabled={!!bk || !cur.n} onClick={runBackup}>
+          {bk ? (bk.total ? '내려받는 중 ' + bk.done + ' / ' + bk.total : '준비 중...')
+              : '⬇ ' + (bkYear ? bkYear + '년' : '전체') + ' 백업 받기'}
         </button>
         {bk && bk.label && <p className="rv-muted rv-small">{bk.label}</p>}
         {bkDone && (
           <Banner kind="info" onClose={() => setBkDone('')}>{bkDone}</Banner>
         )}
+
         <p className="rv-muted rv-small">
-          받은 zip 은 <strong>폰에만 두지 말고</strong> 구글 드라이브 같은 데 한 부 더 올려둬.
+          <strong>연도마다 파일 하나야.</strong> 이름에 날짜를 안 붙여서 다시 받으면 같은 이름이
+          나와 — 드라이브에서 <strong>덮어쓰기</strong>를 고르면 사진이 겹겹이 쌓이지 않아.
+          지난 연도는 신고가 끝나면 더 안 바뀌니까 <strong>한 번만 받으면 끝</strong>이고,
+          올해 것만 가끔 갈아끼우면 돼.
+        </p>
+        <details className="rv-howto">
+          <summary>드라이브에 올리는 법 <span className="rv-howto-tag">3번만 하면 손에 익어</span></summary>
+          <ol className="rv-steps">
+            <li>위 버튼을 누르면 <strong>다운로드</strong> 폴더에 저장돼.</li>
+            <li>알림을 바로 누르거나, <strong>내 파일 → 다운로드</strong>로 들어가.</li>
+            <li>그 zip 을 <strong>길게 눌러 → 공유 → 드라이브</strong>.</li>
+            <li>ReceiptVault 폴더를 하나 만들어 두고 늘 거기로. 같은 이름이면
+                <strong> 덮어쓰기</strong>를 골라.</li>
+          </ol>
+          <p className="rv-muted rv-small">
+            앱에서 드라이브로 바로 올리는 버튼도 만들 수 있는데, 구글 쪽 설정이 필요해서
+            PC 생기면 그때 붙이자. 지금은 이 방법이 더 빨라.
+          </p>
+        </details>
+        <p className="rv-muted rv-small">
           사업 경비는 신고한 해로부터 <strong>3년</strong>, 집 공사비는 <strong>집을 판 뒤 3년</strong>까지
           보관해야 해 — 집 쪽은 사실상 갖고 있는 내내야.
-          {' '}영수증을 새로 넣은 날 한 번씩 받아두면 제일 편해.
         </p>
 
         {/* ---- 점검 ----
