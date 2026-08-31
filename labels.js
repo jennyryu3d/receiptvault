@@ -99,8 +99,12 @@ window.RV_T = {
 };
 
 // 나라 목록. 필요한 것만. AI가 알아낸 값이 여기 없으면 '기타'로 들어간다.
+// taxAtRegister: 가격표에 세금이 빠져 있고 계산대에서 더해지는 나라.
+// 개인 품목을 뺄 때 "가격표 값 × 총액/(총액-세금)" 으로 세금까지 같이 빼야 하는 곳이다.
+// 한국·일본·유럽은 세금이 이미 가격에 들어 있어서 그 보정이 필요 없다 —
+// 거기서 보정하면 오히려 더 많이 빼게 된다.
 window.RV_COUNTRIES = [
-  { code: 'US', en: 'United States', ko: '미국',   currency: 'USD' },
+  { code: 'US', en: 'United States', ko: '미국',   currency: 'USD', taxAtRegister: true },
   { code: 'KR', en: 'South Korea',   ko: '한국',   currency: 'KRW' },
   { code: 'JP', en: 'Japan',         ko: '일본',   currency: 'JPY' },
   { code: 'CN', en: 'China',         ko: '중국',   currency: 'CNY' },
@@ -108,8 +112,8 @@ window.RV_COUNTRIES = [
   { code: 'DE', en: 'Germany',       ko: '독일',   currency: 'EUR' },
   { code: 'IT', en: 'Italy',         ko: '이탈리아', currency: 'EUR' },
   { code: 'FR', en: 'France',        ko: '프랑스', currency: 'EUR' },
-  { code: 'CA', en: 'Canada',        ko: '캐나다', currency: 'CAD' },
-  { code: 'MX', en: 'Mexico',        ko: '멕시코', currency: 'MXN' },
+  { code: 'CA', en: 'Canada',        ko: '캐나다', currency: 'CAD', taxAtRegister: true },
+  { code: 'MX', en: 'Mexico',        ko: '멕시코', currency: 'MXN', taxAtRegister: true },
   { code: 'XX', en: 'Other',         ko: '기타',   currency: 'USD' },
 ];
 

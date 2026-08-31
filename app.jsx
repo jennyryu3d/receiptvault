@@ -393,6 +393,9 @@ function InAppCamera({ onShot, onCancel, onFail }) {
   const [err, setErr] = useState('');
   const [shot, setShot] = useState(null);      // { blob, url }
   const [ready, setReady] = useState(false);
+  const [shooting, setShooting] = useState(false);
+  const aliveRef = useRef(true);
+  useEffect(() => () => { aliveRef.current = false; }, []);
 
   useEffect(() => {
     let alive = true;
@@ -450,15 +453,22 @@ function InAppCamera({ onShot, onCancel, onFail }) {
     }
   }
 
+  // 2560x1440 을 JPEG 로 만드는 데 폰에서는 몇백 ms 걸린다.
+  // 그 사이 한 번 더 누르면 두 장이 만들어지고 앞의 것은 메모리에 갇힌다.
   function take() {
     const v = videoRef.current;
-    if (!v || !v.videoWidth) return;
+    if (!v || !v.videoWidth || shooting) return;
+    setShooting(true);
     const c = document.createElement('canvas');
     c.width = v.videoWidth; c.height = v.videoHeight;
     c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
     c.toBlob((b) => {
+      setShooting(false);
       if (!b) { setErr('사진을 만들지 못했어. 다시 눌러줄래?'); return; }
-      setShot({ blob: b, url: URL.createObjectURL(b) });
+      const url = URL.createObjectURL(b);
+      // 셔터와 결과 사이에 닫혔으면 그냥 버린다
+      if (!aliveRef.current) { try { URL.revokeObjectURL(url); } catch (e) {} return; }
+      setShot({ blob: b, url: url });
     }, 'image/jpeg', 0.92);
   }
 
@@ -498,7 +508,7 @@ function InAppCamera({ onShot, onCancel, onFail }) {
           <video className="rv-cam-view" ref={videoRef} playsInline muted autoPlay />
           <div className="rv-cam-bar">
             <button className="rv-cam-side" onClick={() => { stop(); onCancel(); }}>닫기</button>
-            <button className="rv-cam-shutter" onClick={take} disabled={!ready}
+            <button className="rv-cam-shutter" onClick={take} disabled={!ready || shooting}
                     aria-label="촬영" />
             <span className="rv-cam-side" />
           </div>
@@ -579,13 +589,58 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
   const fileRef = useRef(null);
   const cameraRef = useRef(null);
 
-  // 입력 중인 내용을 계속 저장해 둔다 (사진은 뺀다)
+  // 입력 중인 내용을 계속 저장해 둔다. 글자는 localStorage, 사진은 IndexedDB.
   useEffect(() => {
     if (editing) return;
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ at: Date.now(), rec: rec }));
     } catch (e) {}
   }, [rec, editing, DRAFT_KEY]);
+
+  // 다른 앱으로 넘어가는 그 순간이 제일 위험하다. 안드로이드는 예고 없이
+  // 우리 화면을 정리하고, React 의 effect 는 그때 안 돌 수도 있다.
+  // 화면이 가려지는 즉시 손으로 한 번 더 써둔다.
+  useEffect(() => {
+    if (editing) return;
+    const flush = () => {
+      if (document.visibilityState !== 'hidden') return;
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ at: Date.now(), rec: rec }));
+      } catch (e) {}
+    };
+    document.addEventListener('visibilitychange', flush);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', flush);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [rec, editing, DRAFT_KEY]);
+
+  // 붙여둔 사진도 남겨둔다. 사진은 메모리에만 있는 Blob 이라
+  // 앱이 정리되면 그대로 사라진다 — 글자만 살아 돌아오면 소용이 없다.
+  const [draftPhotosDone, setDraftPhotosDone] = useState(false);
+  useEffect(() => {
+    if (editing) { setDraftPhotosDone(true); return; }
+    let alive = true;
+    window.RV_DRAFT.get(DRAFT_KEY).then((blobs) => {
+      if (!alive) return;
+      if (blobs.length) {
+        setPhotos((list) => list.concat(blobs.map((b, i) => ({
+          key: 'draft' + i, blob: b, url: URL.createObjectURL(b),
+        }))));
+        setPhotosReady(true);
+      }
+      setDraftPhotosDone(true);
+    });
+    return () => { alive = false; };
+  }, [editing, DRAFT_KEY]);
+
+  // 사진 목록이 바뀔 때마다 갈아끼운다. 되살린 게 끝나기 전에 쓰면
+  // 빈 목록으로 덮어써서 방금 되살린 사진을 지우게 된다.
+  useEffect(() => {
+    if (editing || !draftPhotosDone) return;
+    window.RV_DRAFT.put(DRAFT_KEY, photos.filter((p) => p.blob).map((p) => p.blob));
+  }, [photos, editing, draftPhotosDone, DRAFT_KEY]);
 
   // 화면이 새로 떴는데 조금 전에 카메라를 열었던 흔적이 있으면,
   // 사진을 찍고 오는 사이 앱이 종료된 것이다.
@@ -597,8 +652,13 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
     } catch (e) {}
   }, []);
 
+  // 초안은 "새로 쓰던 영수증" 하나만 가리킨다. 수정 화면은 초안을 쓰지도,
+  // 만들지도 않으므로 저장했다고 남의 초안을 지우면 안 된다 — 그러면
+  // 쓰다 만 새 영수증이 통째로 날아간다.
   function clearDraft() {
+    if (editing) return;
     try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+    window.RV_DRAFT.clear(DRAFT_KEY);
   }
 
   // 폰 카메라 앱으로 넘어가기 직전에 흔적을 남긴다.
@@ -611,19 +671,37 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
   // 앱 안 카메라로 찍은 사진은 파일 고르기와 똑같은 길로 보낸다
   async function shotTaken(file) {
     setCamOpen(false);
-    await handleImage(file, 'photo');
+    await handleImage(file, 'photo', photos.length === 0, '');
   }
 
-  // 수정하려고 연 영수증에 이미 붙어 있는 사진들을 불러온다
+  // 수정하려고 연 영수증에 이미 붙어 있는 사진들을 불러온다.
+  //
+  // photosReady 가 핵심이다. 예전에는 origPaths 를 바로 채워놓고 photos 는 서명 URL이
+  // 도착한 뒤에 채웠다. 그 사이에 저장을 누르면 "화면에 사진이 없다 = 사용자가 다 뺐다"
+  // 로 읽혀서 저장소의 원본까지 지워졌다. 되돌릴 수 없는 사고였다.
+  // 이제 목록이 실제로 로드되기 전에는 사진을 아예 건드리지 않는다.
+  const [photosReady, setPhotosReady] = useState(false);
+  const [photoErr, setPhotoErr] = useState('');
+
   useEffect(() => {
     let alive = true;
     const paths = DB.imagePaths(initial);
-    if (!paths.length) return;
+    if (!paths.length) { setPhotosReady(true); return; }
     origPaths.current = paths;
-    Promise.all(paths.map((p) => DB.imageUrl(p))).then((urls) => {
-      if (!alive) return;
-      setPhotos(paths.map((p, i) => ({ key: 'old' + i, path: p, url: urls[i] })));
-    });
+    Promise.all(paths.map((p) => DB.imageUrl(p))).then(
+      (urls) => {
+        if (!alive) return;
+        setPhotos(paths.map((p, i) => ({ key: 'old' + i, path: p, url: urls[i] })));
+        setPhotosReady(true);
+      },
+      () => {
+        // URL을 못 받았다고 사진이 없어진 게 아니다. 준비 안 됨으로 두면
+        // 저장할 때 사진 목록을 손대지 않고 그대로 지나간다.
+        if (!alive) return;
+        setPhotoErr('사진을 불러오지 못했어. 다른 건 고쳐서 저장해도 되고, ' +
+                    '사진은 그대로 남아 있어.');
+      }
+    );
     return () => { alive = false; };
   }, [initial && initial.id]);
 
@@ -633,12 +711,33 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
     return p;
   }
   function dropPhoto(i) {
-    setPhotos((list) => list.filter((_, n) => n !== i));
+    setPhotos((list) => {
+      const gone = list[i];
+      // 새로 찍은 사진은 브라우저 메모리를 붙잡고 있다. 놓아주지 않으면
+      // 하루 입력하는 동안 수십 MB가 쌓이고, 그게 바로 안드로이드가
+      // 앱을 죽이는 이유가 된다. 서버에서 온 사진(path)은 놓아줄 게 없다.
+      if (gone && gone.blob && gone.url) { try { URL.revokeObjectURL(gone.url); } catch (e) {} }
+      return list.filter((_, n) => n !== i);
+    });
   }
   // 대표를 바꾼다 = 그 장을 맨 앞으로. 금액이 인쇄된 장을 대표로 두면 대조가 쉽다.
   function makeMain(i) {
     setPhotos((list) => [list[i]].concat(list.filter((_, n) => n !== i)));
   }
+
+  // 이 장부의 첫 분류. 분할 줄의 기본값으로 쓴다 —
+  // 예전에는 'supplies' 로 박혀 있었는데 그건 가죽 장부에만 있는 키라,
+  // 집 리모델링 장부에서는 그 줄이 보고서 어느 칸에도 안 잡히고 조용히 사라졌다.
+  const firstCat = window.RV_FIRST_CAT(ledger.kind, ledger.cat_set);
+
+  // 화면을 떠날 때 아직 붙잡고 있는 사진 메모리를 전부 놓아준다
+  const photosRef = useRef([]);
+  useEffect(() => { photosRef.current = photos; }, [photos]);
+  useEffect(() => () => {
+    photosRef.current.forEach((p) => {
+      if (p && p.blob && p.url) { try { URL.revokeObjectURL(p.url); } catch (e) {} }
+    });
+  }, []);
 
   function set(k, v) { setRec((r) => Object.assign({}, r, { [k]: v })); }
 
@@ -668,8 +767,10 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
         : Object.assign({}, r, { fx_rate: 1, fx_source: 'same', fx_rate_date: r.purchased_at }));
       return;
     }
-    if (rec.fx_source === 'manual') return;
-    if (!rec.purchased_at) return;
+    // 수동 입력으로 넘어갔으면 남아 있던 '못 가져왔어' 와 '가져오는 중' 을 치운다.
+    // 안 그러면 시킨 대로 했는데도 경고가 영영 안 사라진다.
+    if (rec.fx_source === 'manual') { setFxErr(''); setFxBusy(false); return; }
+    if (!rec.purchased_at) { setFxBusy(false); return; }
 
     setFxBusy(true); setFxErr('');
     U.fetchRate(rec.currency, rec.purchased_at).then(
@@ -742,7 +843,10 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
   // 세금 처리는 나라마다 다르다.
   //   미국: 진열 가격은 세전이고 계산할 때 판매세가 붙는다 → 뺄 때 그 몫도 같이 빼야 한다.
   //   한국·일본·유럽: 가격에 부가세가 이미 들어 있다 → 적힌 가격 그대로 빼면 된다.
-  const taxAdded = (rec.country === 'US') && taxAmt > 0 && originalAmount > taxAmt;
+  // 계산대에서 세금이 더해지는 나라(미국·캐나다·멕시코)에서만 보정한다.
+  // 한국·일본·유럽은 세금이 이미 가격표에 들어 있다.
+  const cty = window.RV_COUNTRIES.find((c) => c.code === rec.country);
+  const taxAdded = !!(cty && cty.taxAtRegister) && taxAmt > 0 && originalAmount > taxAmt;
   const exclWithTax = taxAdded
     ? exclRaw * (originalAmount / (originalAmount - taxAmt))
     : exclRaw;
@@ -768,7 +872,7 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
     setRec((r) => Object.assign({}, r, {
       splits: [
         { category: r.category, amount: r.amount_original || '', note: '' },
-        { category: 'supplies', amount: '', note: '' },
+        { category: firstCat, amount: '', note: '' },
       ],
     }));
   }
@@ -783,7 +887,7 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
 
   function addSplit() {
     setRec((r) => Object.assign({}, r, {
-      splits: r.splits.concat([{ category: 'supplies', amount: '', note: '' }]),
+      splits: r.splits.concat([{ category: firstCat, amount: '', note: '' }]),
     }));
   }
 
@@ -808,23 +912,33 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
     setSplit(i, 'amount', zeroDec ? String(Math.round(next)) : next.toFixed(2));
   }
 
+  // 갤러리에서는 여러 장을 한 번에 고를 수 있다. 영수증이 두세 장인 거래에서
+  // 한 장씩 여섯 번 왕복하는 건 너무 번거롭다.
   async function pickImage(e, source) {
-    const file = e.target.files && e.target.files[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
-    await handleImage(file, source);
+    if (!files.length) return;
+    // 이 시점의 장수를 세어둔다. setPhotos 는 곧바로 반영되지 않아서
+    // 반복문 안에서 photos.length 를 보면 전부 "첫 장" 으로 읽힌다.
+    const had = photos.length;
+    for (let i = 0; i < files.length; i++) {
+      // 하나씩 차례로. 한꺼번에 돌리면 폰 메모리가 튀고,
+      // 첫 장의 인식이 끝나기 전에 둘째 장이 끼어든다.
+      await handleImage(files[i], source, had + i === 0,
+                        files.length > 1 ? (i + 1) + '/' + files.length : '');
+    }
   }
 
   // 사진 한 장이 들어왔을 때 하는 일. 앱 안 카메라도, 갤러리도 여기로 모인다.
-  async function handleImage(file, source) {
-    setErr(''); setNote(''); setBusy('이미지 정리하는 중...');
+  async function handleImage(file, source, first, ofN) {
+    setErr(''); setNote('');
+    setBusy(ofN ? '사진 ' + ofN + ' 정리하는 중...' : '이미지 정리하는 중...');
     setCameraLost(false);
     try { localStorage.removeItem(CAM_KEY); } catch (ex2) {}
 
     // 사진 준비와 AI 인식을 분리한다.
     // 예전에는 한 덩어리라서 인식이 실패하면 사진까지 같이 날아갔다 —
     // 사진은 증빙이라 인식이 안 되더라도 반드시 남아야 한다.
-    const first = photos.length === 0;
     let small;
     try {
       small = await U.compressImage(file);
@@ -841,7 +955,9 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
     // 틀린 금액만 받게 되고, 하루 한도도 장수만큼 나간다.
     if (!first) {
       setBusy('');
-      setNote('「증빙 ' + photos.length + '」로 붙였어. 금액은 대표(첫 장)에서만 읽어.');
+      setNote(ofN
+        ? '사진 ' + ofN + ' 붙였어. 금액은 대표(첫 장)에서만 읽어.'
+        : '「증빙 ' + photos.length + '」로 붙였어. 금액은 대표(첫 장)에서만 읽어.');
       return;
     }
 
@@ -859,6 +975,11 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
   // 같은 사진으로 "다시 인식" 만 하고 싶을 때가 있다.
   async function runExtract(small, source) {
     setErr(''); setBusy('영수증 읽는 중...');
+    // 인식은 몇 초 걸린다. 그 사이에 사람이 고친 칸은 AI가 덮어쓰면 안 된다 —
+    // 눈앞에서 방금 친 글자가 사라지는 것만큼 나쁜 게 없다.
+    // 그래서 시작할 때의 값을 찍어두고, 돌아왔을 때 그대로인 칸만 채운다.
+    const before = rec;
+    const keep = (r, k, next) => (r[k] !== before[k] ? r[k] : next);
     try {
       const got = await AI.extract(small, ledgerId, ledger);
 
@@ -866,8 +987,12 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
       // 분류 key 가 실제로 있고, 합계가 총액과 맞을 때만 받아들인다.
       let aiSplits = [];
       if (Array.isArray(got.splits) && got.splits.length > 1 && got.amount != null) {
+        // 이 장부의 분류만 받는다. 전체 분류표로 확인하면 다른 장부의 키가
+        // 섞여 들어와 그 줄이 보고서에서 통째로 빠진다.
+        const ok = {};
+        window.RV_CATS(ledger).forEach((c) => { ok[c.key] = 1; });
         const clean = got.splits.filter(
-          (x) => x && window.RV_CAT_BY_KEY[x.category] && Number(x.amount) > 0);
+          (x) => x && ok[x.category] && Number(x.amount) > 0);
         if (clean.length > 1 && U.splitRemainder(got.amount, clean) === 0) {
           aiSplits = clean.map((x) => ({
             category: x.category,
@@ -880,24 +1005,32 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
       const cur = (window.RV_CURRENCIES || []).includes(got.currency) ? got.currency : null;
       const ctry = window.RV_COUNTRIES.some((c) => c.code === got.country) ? got.country : null;
 
+      // AI가 준 분류 key 가 이 장부의 분류표에 실제로 있는지 본다.
+      // RV_CAT_BY_KEY 는 모든 장부의 분류를 합쳐놓은 표라, 그것만 보면
+      // 집 리모델링 분류가 공방 장부에 들어올 수 있다. 그러면 그 금액은
+      // 보고서 어느 칸에도 안 잡히고 조용히 사라진다.
+      const mine = window.RV_CATS(ledger).some((c) => c.key === got.category);
+
       setRec((r) => Object.assign({}, r, {
-        splits: aiSplits,
-        purchased_at: got.purchased_at || r.purchased_at,
-        merchant: got.merchant || r.merchant,
-        merchant_en: got.merchant_en || r.merchant_en || '',
-        notes_en: got.notes_en || r.notes_en || '',
-        notes: r.notes || got.notes_en || '',
-        country: ctry || r.country,
-        currency: cur || r.currency,
+        splits: aiSplits.length ? aiSplits : r.splits,
+        purchased_at: keep(r, 'purchased_at', got.purchased_at || r.purchased_at),
+        merchant: keep(r, 'merchant', got.merchant || r.merchant),
+        merchant_en: keep(r, 'merchant_en', got.merchant_en || r.merchant_en || ''),
+        notes_en: keep(r, 'notes_en', got.notes_en || r.notes_en || ''),
+        notes: keep(r, 'notes', r.notes || got.notes_en || ''),
+        country: keep(r, 'country', ctry || r.country),
+        currency: keep(r, 'currency', cur || r.currency),
         // 통화가 바뀌었으니 환율은 다시 받아오게 표시해 둔다
         fx_source: cur && cur !== 'USD' ? 'ecb' : 'same',
-        amount_original: got.amount != null ? String(got.amount) : r.amount_original,
-        tax: got.tax != null ? String(got.tax) : r.tax,
-        payment_method: got.payment_method || r.payment_method,
+        amount_original: keep(r, 'amount_original',
+          got.amount != null ? String(got.amount) : r.amount_original),
+        tax: keep(r, 'tax', got.tax != null ? String(got.tax) : r.tax),
+        payment_method: keep(r, 'payment_method', got.payment_method || r.payment_method),
         // 어느 카드였는지. 명세서와 대조할 때 쓰는 값이라 자동으로 채우고,
         // 틀리면 손으로 고칠 수 있게 그냥 글자로 둔다.
-        payment_ref: U.cleanPaymentRef(got.payment_ref) || r.payment_ref || '',
-        category: got.category && window.RV_CAT_BY_KEY[got.category] ? got.category : r.category,
+        payment_ref: keep(r, 'payment_ref',
+          U.cleanPaymentRef(got.payment_ref) || r.payment_ref || ''),
+        category: keep(r, 'category', mine ? got.category : r.category),
         ai_raw: got,
         needs_review: true,
         source: source || r.source,
@@ -939,6 +1072,17 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
     if (foreign && !(Number(rec.fx_rate) > 0)) {
       return setErr('환율을 못 가져왔어. 달러 금액을 직접 넣어주면 저장돼.');
     }
+    // 환율 1은 "1원 = 1달러" 다. 외화 영수증에서 이 값이 저장되면
+    // ₩1,200,000 이 $1,200,000 으로 신고에 들어간다. 처음 값이 1이라
+    // 조회가 실패했거나 아직 안 끝났을 때 그대로 통과하고 있었다.
+    if (foreign && Number(rec.fx_rate) === 1 && rec.fx_source !== 'manual') {
+      return setErr(
+        '아직 환율이 안 잡혔어 (1 ' + rec.currency + ' = 1 USD 로 되어 있어). ' +
+        '잠깐 기다렸다 다시 누르거나, 카드에 청구된 달러 금액을 직접 넣어줘.');
+    }
+    if (foreign && fxBusy) {
+      return setErr('환율 가져오는 중이야. 잠깐만 기다렸다 저장해줘.');
+    }
 
     if (splitting && splits.some((x) => !(U.parseAmount(x.amount) > 0))) {
       return setErr('분할한 줄 중에 금액이 빈 게 있어. 금액을 넣거나 그 줄을 지워줘.');
@@ -957,18 +1101,22 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
     try {
       const saved = await DB.save(Object.assign({}, rec, { needs_review: false }), ledgerId, session);
 
-      if (photos.length || origPaths.current.length) {
+      // 사진 목록을 아직 못 읽었으면 손대지 않는다. "화면에 없다" 와
+      // "아직 안 떴다" 를 구분하지 못하면 남의 증빙을 지우게 된다.
+      if (photosReady && (photos.length || origPaths.current.length)) {
         setBusy(photos.length > 1 ? '사진 ' + photos.length + '장 올리는 중...' : '사진 올리는 중...');
         try {
           await DB.saveImages(ledgerId, saved.id, photos, origPaths.current);
         } catch (imgEx) {
           // 영수증 자체는 이미 저장됐다. 사진만 실패한 걸로 전체를 되돌리면
           // 방금 입력한 내용을 다시 치게 만드는 셈이라 더 나쁘다.
+          // 다만 rec.id 를 채워둔다 — 안 그러면 다시 누를 때 새 영수증이 하나 더 생긴다.
+          setRec((r) => Object.assign({}, r, { id: saved.id }));
           clearDraft();
           setBusy('');
           setErr('영수증은 저장됐는데 사진만 못 올렸어: ' +
                  (imgEx.message || '알 수 없는 오류') +
-                 ' — 목록에서 그 영수증을 열어 사진만 다시 넣으면 돼.');
+                 ' — 다시 저장을 누르면 사진만 다시 올려. 같은 영수증에 붙어.');
           return;
         }
       }
@@ -1036,7 +1184,10 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
   return (
     <div className="rv-screen">
       <div className="rv-topbar">
-        <button className="rv-btn-ghost" onClick={onCancel}><L k="cancel" /></button>
+        {/* 취소하면 초안도 버린다. 안 그러면 그만둔 영수증의 가맹점·목적이
+            다음에 새로 쓰는 영수증에 되살아나 붙는다 — 24시간 동안. */}
+        <button className="rv-btn-ghost"
+                onClick={() => { clearDraft(); onCancel(); }}><L k="cancel" /></button>
         <strong><L k={editing ? 'editReceipt' : 'addReceipt'} /></strong>
         <button className="rv-btn-sm" onClick={save} disabled={!!busy}><L k="save" /></button>
       </div>
@@ -1073,13 +1224,20 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
           </Banner>
         )}
 
-        {restored && (
+        {(restored || (draftPhotosDone && !editing && photos.some((p) => p.blob) && !rec.id)) && (
           <Banner kind="info" onClose={() => setRestored(false)}>
-            쓰다 만 내용을 이어서 불러왔어.
+            쓰다 만 내용을 이어서 불러왔어
+            {photos.filter((p) => p.blob).length > 0 &&
+              ' (사진 ' + photos.filter((p) => p.blob).length + '장 포함)'}.
             {' '}
             <button className="rv-linkbtn" onClick={() => {
               clearDraft();
               setRestored(false);
+              // 사진도 같이 버린다. 글자만 비우면 남의 영수증 사진이 붙어 있게 된다.
+              photos.forEach((p) => {
+                if (p.blob && p.url) { try { URL.revokeObjectURL(p.url); } catch (e) {} }
+              });
+              setPhotos([]);
               setRec(Object.assign({}, BLANK,
                 { category: window.RV_FIRST_CAT(ledger.kind, ledger.cat_set) }));
             }}>새로 시작</button>
@@ -1093,16 +1251,19 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
         )}
 
         <div className="rv-photo-row">
-          <button className="rv-btn-ghost rv-grow" onClick={() => { setErr(''); setCamOpen(true); }}>
+          {/* 인식이 도는 중에 또 찍으면 결과 두 개가 서로를 덮어쓴다 */}
+          <button className="rv-btn-ghost rv-grow" disabled={!!busy}
+                  onClick={() => { setErr(''); setCamOpen(true); }}>
             📷 {photos.length ? '사진 더 찍기' : <L k="takePhoto" />}
           </button>
-          <button className="rv-btn-ghost rv-grow" onClick={() => fileRef.current.click()}>
+          <button className="rv-btn-ghost rv-grow" disabled={!!busy}
+                  onClick={() => fileRef.current.click()}>
             🖼 <L k="fromGallery" />
           </button>
         </div>
         <input ref={cameraRef} type="file" accept="image/*" capture="environment"
                hidden onChange={(e) => pickImage(e, 'photo')} />
-        <input ref={fileRef} type="file" accept="image/*"
+        <input ref={fileRef} type="file" accept="image/*" multiple
                hidden onChange={(e) => pickImage(e, 'screenshot')} />
         {rec.ai_raw && photos.length > 0 && (
           <button className="rv-btn-ghost rv-wide-sm" disabled={!!busy}
@@ -1111,10 +1272,11 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
           </button>
         )}
         <p className="rv-muted rv-small">
-          촬영은 앱 안에서 바로 돼. 화면이 안 떠나니까 쓰던 내용도 그대로야.
+          촬영은 앱 안에서 바로 돼. 갤러리에서는 <strong>여러 장을 한 번에</strong> 고를 수 있어.
           <strong> 한 거래에 종이가 여러 장이면 다 붙여</strong> — 손으로 쓴 명세 여러 장에
           카드 전표가 따로 붙는 거래가 그렇다. <strong>금액이 인쇄된 장을 대표로</strong> 두면
           되고, 나머지는 증빙으로 그대로 남아. AI는 대표 한 장만 읽어.
+          {' '}쓰던 내용과 붙인 사진은 저장 전에 다른 앱에 다녀와도 남아 있어.
         </p>
 
         {!AI.available() && (
@@ -1957,6 +2119,30 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
   // 문서 맨 아래 주석. 어떤 줄을 넣을지는 장부 종류가 고른다(D.notes).
   function note(key) {
     switch (key) {
+      case 'grandCaveat':
+        return <li key={key}><strong>Read the total with care.</strong> The figure at the foot of
+            this page is what was spent and recorded — it is <strong>not</strong> the Schedule C
+            deduction. Purchases still need an inventory adjustment (Part III), line 13 runs
+            through Form 4562, and line 9 depends on the mileage-vs-actual election.
+            Each is noted below.</li>;
+      case 'inventory':
+        return <li key={key}><strong>Inventory is not tracked.</strong> Part III lines 35, 37, 39
+            and 41 (beginning inventory, cost of labor, other costs, ending inventory) are not
+            recorded in this system, so line 42 cannot be computed from this page alone.
+            The purchases figure above is materials bought during the year, whether or not they
+            were used.</li>;
+      case 'startup':
+        return <li key={key}><strong>Business start date:</strong> the owner's business
+            registration was still in progress during part of this period. Costs paid before the
+            business was actively operating may be start-up costs under §195 rather than current
+            expenses. Please confirm the date the business began.</li>;
+      case 'aiReviewed': {
+        const un = rows.filter((r) => r.needs_review).length;
+        return <li key={key}>Categories were suggested automatically from receipt images and
+            confirmed by the taxpayer at entry.{un
+              ? <> <strong>{un} receipt{un > 1 ? 's are' : ' is'} still marked unreviewed</strong> —
+                flagged in the CSV.</> : null}</li>;
+      }
       case 'deductibleAmounts':
         return <li key={key}>Amounts shown are <strong>deductible amounts</strong>, not gross spend.</li>;
       case 'meals':
@@ -2193,8 +2379,12 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
                     {missingPurpose.length > 1 ? 's have' : ' has'} no description recorded.</li>
               )}
               {mealsRows.length > 0 && (
-                <li>Meals: attendees and business discussion are recorded in the business-purpose
-                    field per receipt (see CSV).</li>
+                // 참석자 칸이 따로 없다. "기록돼 있다" 고 단언하면 없는 증빙을
+                // 있다고 말하는 셈이라, 있는 그대로 적는다.
+                <li><strong>Meals substantiation:</strong> Pub. 463 requires the business
+                    relationship — names and occupations of those present. This system records a
+                    free-text business purpose only; please confirm attendees are named there
+                    before claiming.</li>
               )}
               <li>Category assignments were made by the {D.reviewedBy} at entry and should be
                   reviewed before {D.reviewedBefore}.</li>
@@ -2202,6 +2392,13 @@ function TaxDoc({ rows, year, ledger, members, onBack }) {
           </section>
 
           <footer className="tx-foot">
+            {/* 화면에는 안내가 있었지만 정작 밖으로 나가는 종이에는 없었다.
+                남는 건 이 PDF 다. */}
+            <p className="tx-disc">
+              Taxpayer-prepared summary from receipt records. Not tax advice and not a
+              return. Figures are as recorded by the taxpayer and should be verified against
+              source documents before filing. Receipt images are retained and available on request.
+            </p>
             Prepared with ReceiptVault · {prepared}
           </footer>
         </div>
@@ -2232,7 +2429,9 @@ function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
     const paths = DB.imagePaths(rec);
     if (!paths.length) { setUrls([]); return; }
     Promise.all(paths.map((p) => DB.imageUrl(p))).then((got) => {
-      if (alive) setUrls(got.filter(Boolean));
+      // 못 받은 장을 걸러내면 뒤의 사진이 앞으로 당겨져서
+      // '증빙 1' 이 '대표 · 정산' 으로 둔갑한다. 자리는 그대로 두고 비워둔다.
+      if (alive) setUrls(got);
     });
     return () => { alive = false; };
   }, [rec.id, rec.image_path, (rec.extra_paths || []).join('|')]);
@@ -2309,13 +2508,15 @@ function Detail({ rec, ledger, members, canWrite, onEdit, onDeleted, onBack }) {
           : <Banner kind="warn">
               {P.form.purposeMissing}
             </Banner>}
-        {urls.length > 0 && (
+        {urls.filter(Boolean).length > 0 && (
           <>
             <div className="rv-photos">
               {urls.map((u, i) => (
-                <div key={u} className={'rv-photo' + (i === 0 ? ' rv-photo-main' : '')}>
-                  <img src={u} alt={i === 0 ? '대표 사진' : '증빙 사진 ' + i}
-                       onClick={() => setBig(u)} />
+                <div key={i} className={'rv-photo' + (i === 0 ? ' rv-photo-main' : '')}>
+                  {u
+                    ? <img src={u} alt={i === 0 ? '대표 사진' : '증빙 사진 ' + i}
+                           onClick={() => setBig(u)} />
+                    : <div className="rv-photo-gone">사진을<br />못 불러왔어</div>}
                   {urls.length > 1 && (
                     <span className="rv-photo-tag">{i === 0 ? '대표 · 정산' : '증빙 ' + i}</span>
                   )}
@@ -2405,6 +2606,20 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
     } catch (ex) { setErr(ex.message || '초대하지 못했어요.'); }
   }
 
+  // ---- 같이 쓰는 사람 내보내기 ----
+  const [dropping, setDropping] = useState(null);
+
+  async function dropMember(m) {
+    setErr(''); setMsg('');
+    try {
+      await DB.removeMember(ledger.id, m.user_id);
+      setDropping(null);
+      setMsg(U.shortName(m.email) + ' 을(를) 이 장부에서 뺐어. ' +
+             '넣었던 영수증은 그대로 남아 있어 — 기록이니까.');
+      onReload();
+    } catch (ex) { setErr(ex.message || '내보내지 못했어요.'); }
+  }
+
   // ---- 백업 ----
   // 사진을 한 장씩 받아 zip 으로 묶는다. 폰에서는 수십 초 걸릴 수 있어서
   // 몇 장째인지 계속 보여준다 — 멈춘 줄 알고 화면을 떠나면 처음부터 다시다.
@@ -2432,6 +2647,14 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
 
   const bkYears = useMemo(
     () => Object.keys(stats).filter((k) => k !== 'all').sort().reverse(), [stats]);
+
+  // 올해 영수증이 없으면 목록에 올해가 없다. 그러면 <select> 는 첫 줄을 보여주는데
+  // 상태는 올해에 머물러서, 보이는 연도를 눌러도 아무 일이 안 일어난다.
+  // 자료가 있는 연도로 옮겨준다.
+  useEffect(() => {
+    if (!bkYears.length) return;
+    if (bkYear && bkYears.indexOf(bkYear) < 0) setBkYear(bkYears[0]);
+  }, [bkYears, bkYear]);
 
   const cur = stats[bkYear || 'all'] || { n: 0, photos: 0, latest: '' };
   const mark = marks[bkYear || 'all'];
@@ -2569,6 +2792,21 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
               <span className="rv-role">
                 {m.role === 'owner' ? '주인' : m.role === 'editor' ? '입력 가능' : '보기만'}
               </span>
+              {/* 내보내기가 없으면 한번 들인 사람을 앱에서 뺄 방법이 없다.
+                  가족끼리는 문제가 안 되지만 모임에 열어주면 반드시 필요해진다. */}
+              {isOwner && m.role !== 'owner' && (
+                dropping === m.user_id ? (
+                  <span className="rv-member-confirm">
+                    <button className="rv-btn-danger rv-tiny"
+                            onClick={() => dropMember(m)}>정말 뺄까</button>
+                    <button className="rv-btn-ghost rv-tiny"
+                            onClick={() => setDropping(null)}>취소</button>
+                  </span>
+                ) : (
+                  <button className="rv-btn-ghost rv-tiny"
+                          onClick={() => setDropping(m.user_id)}>내보내기</button>
+                )
+              )}
             </div>
           ))}
           {invites.map((i) => (
@@ -2786,6 +3024,30 @@ function App() {
   const [sheet, setSheet] = useState(false);   // 장부 고르는 판이 열렸나
   const [refreshing, setRefreshing] = useState(false);
   const [mode, setMode] = useState(null);            // null | add | edit | detail | tax
+
+  // 쓰다 만 영수증이 있으면 그 화면으로 돌아간다.
+  //
+  // 초안은 계속 저장되고 있었는데, 앱이 다시 뜨면 화면이 목록으로 떨어져서
+  // 사용자 눈에는 "다 사라졌다" 로 보였다. 저장된 걸 되살려도 그 화면을
+  // 다시 열어주지 않으면 소용이 없다.
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!ledgerId || resumed.current) return;
+    resumed.current = true;
+    try {
+      const raw = localStorage.getItem('rv_draft_' + ledgerId);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (!d || !d.at || Date.now() - d.at > 86400000) return;
+      const r = d.rec || {};
+      const hasContent = !!(r.merchant || r.amount_original || r.notes ||
+                            (r.splits && r.splits.length));
+      // 사진만 붙여두고 앱이 죽은 경우도 이어서 써야 한다
+      window.RV_DRAFT.get('rv_draft_' + ledgerId).then((blobs) => {
+        if (hasContent || blobs.length) setMode('add');
+      });
+    } catch (e) {}
+  }, [ledgerId]);
   const [current, setCurrent] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2815,7 +3077,17 @@ function App() {
   useEffect(() => {
     if (!DB.configured()) { setSession(null); return; }
     DB.getSession().then(setSession);
-    return DB.onAuthChange(setSession);
+    // 토큰은 주기적으로 갱신된다. 그때마다 session 객체가 새로 오는데,
+    // 그걸 그대로 넣으면 아래 boot 이 다시 돌고 화면이 통째로 다시 그려진다.
+    // 영수증을 쓰던 중이었다면 붙여둔 사진이 그 자리에서 사라진다.
+    // 사람이 바뀐 게 아니면 굳이 갈아끼우지 않는다.
+    return DB.onAuthChange((next) => {
+      setSession((prev) => {
+        const same = prev && next && prev.user && next.user &&
+                     prev.user.id === next.user.id;
+        return same ? prev : next;
+      });
+    });
   }, []);
 
   // 로그인 직후: 초대를 받아들이고 볼 장부를 고른다
@@ -2947,6 +3219,31 @@ function App() {
   if (session === undefined) return <div className="rv-center"><Spinner /></div>;
   if (session === null) return <SignIn />;
   if (booting) return <div className="rv-center"><Spinner label="장부 여는 중..." /></div>;
+
+  // 장부를 못 불러온 채로 "장부 만들기" 화면을 띄우면, 자료가 멀쩡히 있는데도
+  // 없는 줄 알고 하나를 더 만들게 된다. 그러면 진짜 장부는 안 보인 채로 남는다.
+  // 실패했을 때는 실패했다고 말하고 다시 시도할 길만 준다.
+  if (err && !ledger && mode !== 'newledger') {
+    return (
+      <div className="rv-center">
+        <div className="rv-boot-fail">
+          <h3 className="rv-h3">장부를 못 불러왔어</h3>
+          <p className="rv-muted rv-small">{err}</p>
+          <p className="rv-muted rv-small">
+            보통 인터넷이 잠깐 끊긴 거야. 자료는 그대로 있어 —
+            <strong> 여기서 장부를 새로 만들지 마.</strong> 하나 더 생겨서 헷갈려져.
+          </p>
+          <button className="rv-btn rv-wide" onClick={() => { setErr(''); boot(); }}>
+            다시 시도
+          </button>
+          <button className="rv-btn-ghost rv-wide"
+                  onClick={() => { setErr(''); setMode('newledger'); }}>
+            그래도 새 장부 만들기
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!ledger || mode === 'newledger') {
     return (

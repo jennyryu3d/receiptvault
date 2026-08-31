@@ -86,7 +86,11 @@
     // 분할 금액은 "영수증에 찍힌 통화" 로 넣는다. 영수증을 보고 옮겨 적는 거니까
     // 그게 자연스럽다. USD 환산은 여기서 환율을 곱해 만든다.
     lines: function (r) {
-      var pct = (r.business_pct == null ? 100 : r.business_pct) / 100;
+      // 빈 값('')은 0이 아니라 "안 적었다"이다. Number('')/100 이 0이 되어
+      // 공제가 통째로 사라지는 일이 있었다. 100(전부 사업용)으로 본다.
+      var pctRaw = Number(r.business_pct);
+      var pct = (r.business_pct === '' || r.business_pct == null || !isFinite(pctRaw))
+        ? 1 : pctRaw / 100;
       var rate = Number(r.fx_rate);
       if (!isFinite(rate) || rate <= 0) rate = 1;
 
@@ -326,33 +330,18 @@
 
     // 내 이메일 앞으로 온 초대를 전부 받아들인다.
     // 남편이 먼저 로그인해 두었더라도, 초대가 도착한 뒤 다시 열면 여기서 합류된다.
+    // 초대를 받아들인다. 실제 처리는 서버(rv_claim_invites)가 한다 —
+    // 합류와 초대장 삭제가 한 덩어리여야 "초대장을 안 지우고 버티기" 가 막힌다.
+    // 역할도 초대장에 적힌 것으로 서버가 정한다.
     claimInvites: async function (session) {
       var c = need();
-      var email = (session.user.email || '').toLowerCase();
-
-      var inv = await c.from('ledger_invites').select('*').ilike('email', email);
-      if (inv.error || !inv.data || !inv.data.length) return 0;
-
-      var mine = await c.from('ledger_members').select('ledger_id').eq('user_id', session.user.id);
-      var already = new Set((mine.data || []).map(function (m) { return m.ledger_id; }));
-
-      var joined = 0;
-      for (var i = 0; i < inv.data.length; i++) {
-        var row = inv.data[i];
-        if (!already.has(row.ledger_id)) {
-          var ins = await c.from('ledger_members').insert({
-            ledger_id: row.ledger_id,
-            user_id: session.user.id,
-            email: session.user.email,
-            role: row.role,
-          });
-          if (ins.error) continue; // 이미 들어가 있거나 초대가 취소된 경우
-          joined++;
-        }
-        // 초대장은 역할을 이미 옮겨 담았으니 치운다
-        await c.from('ledger_invites').delete().eq('id', row.id);
+      var res = await c.rpc('rv_claim_invites');
+      if (res.error) {
+        // 아직 migrate-6 을 안 돌린 데이터베이스라면 조용히 넘어간다 —
+        // 로그인 자체가 막히는 것보다는 낫다.
+        return 0;
       }
-      return joined;
+      return Number(res.data) || 0;
     },
 
     listLedgers: async function () {
@@ -576,7 +565,16 @@
         total: usdTotal,
         tax: isFinite(taxAmount) ? taxAmount : null,
         payment_method: rec.payment_method || null,
-        business_pct: rec.business_pct == null ? 100 : Number(rec.business_pct),
+        // 카드 표기. 화면에서 받고 CSV로도 내보내면서 정작 저장을 안 하고 있었다 —
+        // 그래서 세무사 파일의 이 칸이 늘 비어 있었다.
+        payment_ref: (rec.payment_ref || '').trim() || null,
+        // 빈 칸('')은 0이 아니라 "안 적었다"이다. Number('')는 0이라서
+        // 칸을 지우고 저장하면 공제가 통째로 0이 되어버렸다.
+        business_pct: (function () {
+          var v = Number(rec.business_pct);
+          return (rec.business_pct === '' || rec.business_pct == null || !isFinite(v))
+            ? 100 : Math.min(100, Math.max(0, v));
+        })(),
         notes: rec.notes || null,
         source: rec.source || 'manual',
         ai_raw: rec.ai_raw || null,
@@ -1022,28 +1020,43 @@
                             .replace(/\s+/g, ' ').trim().slice(0, 40);
     }
 
+    // 분류가 나뉜 영수증은 줄도 나뉘어야 한다.
+    // 예전에는 한 영수증 = 한 줄이면서 분류는 "가장 큰 줄" 것을, 공제액은
+    // "영수증 전체" 것을 적었다. 식비 $120 + 공구 $80 짜리 영수증이
+    // "식비 · Schedule C 24b · 공제 $140" 으로 나가서, 세무사가 그대로 옮기면
+    // 식비를 $140 로 잡고 50% 한도까지 엉뚱한 데 걸린다.
     function csvOf(rows, ledger) {
       var head = [
         'receipt_id', 'ledger', 'date', 'merchant', 'merchant_en', 'country',
-        'currency', 'amount_original', 'fx_rate', 'fx_rate_date', 'fx_source',
-        'amount_usd', 'sales_tax', 'category_key', 'category_en', 'form_line',
-        'business_pct', 'deductible_usd', 'payment_method', 'payment_ref',
-        'purpose', 'purpose_en', 'splits_json', 'photo_files', 'entered_at',
+        'currency', 'receipt_total_local', 'fx_rate', 'fx_rate_date', 'fx_source',
+        'receipt_total_usd', 'sales_tax_local',
+        'line_no', 'line_amount_local', 'line_amount_usd',
+        'category_key', 'category_en', 'form_line',
+        'business_pct', 'deductible_usd', 'needs_review',
+        'payment_method', 'payment_ref', 'purpose', 'purpose_en',
+        'photo_files', 'entered_at',
       ];
       var P = window.RV_KIND(ledger.kind);
       var out = [head.join(',')];
       rows.forEach(function (r) {
-        var cat = window.RV_CAT(r.category);
-        out.push([
-          r.id, ledger.name, r.purchased_at, r.merchant, r.merchant_en, r.country,
-          r.currency, r.amount_original, r.fx_rate, r.fx_rate_date, r.fx_source,
-          r.total, r.tax, r.category, cat.en, (P.lineLabel && cat.line ? P.lineLabel + ' ' + cat.line : ''),
-          r.business_pct, RV_UTIL.deductible(r).toFixed(2), r.payment_method, r.payment_ref,
-          r.notes, r.notes_en,
-          (r.splits && r.splits.length) ? JSON.stringify(r.splits) : '',
-          (r._files || []).join('; '),
-          r.created_at,
-        ].map(RV_UTIL.csvCell).join(','));
+        var lines = RV_UTIL.lines(r);
+        lines.forEach(function (l, i) {
+          var cat = l.cat;
+          out.push([
+            r.id, ledger.name, r.purchased_at, r.merchant, r.merchant_en, r.country,
+            r.currency, r.amount_original, r.fx_rate, r.fx_rate_date, r.fx_source,
+            r.total, r.tax,
+            (i + 1) + '/' + lines.length, l.amount, l.usd.toFixed(2),
+            cat.key, cat.en,
+            (P.lineLabel && cat.line ? P.lineLabel + ' ' + cat.line : ''),
+            r.business_pct, l.deductible.toFixed(2), r.needs_review ? 'unreviewed' : '',
+            r.payment_method, r.payment_ref,
+            // 영수증 단위 값은 첫 줄에만 — 엑셀에서 합계를 낼 때 겹치지 않게
+            i === 0 ? r.notes : '', i === 0 ? r.notes_en : '',
+            i === 0 ? (r._files || []).join('; ') : '',
+            r.created_at,
+          ].map(RV_UTIL.csvCell).join(','));
+        });
       });
       // 엑셀이 한글을 깨뜨리지 않도록 BOM 을 붙인다
       return '﻿' + out.join('\n');
@@ -1151,10 +1164,70 @@
     return { build: build, csvOf: csvOf, safeName: safeName };
   })();
 
+  // =============================================================
+  // RV_DRAFT — 쓰다 만 영수증의 사진을 안 잃어버리게
+  //
+  // 글자는 localStorage 로 충분한데 사진은 안 된다. localStorage 는 글자만 담고
+  // 용량도 5MB 남짓이라 사진 한 장이면 찬다. 그래서 사진만 IndexedDB 에 둔다 —
+  // 여기는 Blob 을 그대로 담을 수 있고 앱이 죽었다 살아나도 남아 있다.
+  //
+  // 왜 필요한가: 사진을 붙여놓고 카톡을 잠깐 보고 오면 안드로이드가 그 사이에
+  // 앱을 정리해버린다. 돌아오면 처음부터 다시였다.
+  // =============================================================
+  var RV_DRAFT = (function () {
+    var NAME = 'rv_drafts', STORE = 'photos', VER = 1;
+    var dbp = null;
+
+    function open() {
+      if (dbp) return dbp;
+      dbp = new Promise(function (resolve, reject) {
+        if (!window.indexedDB) return reject(new Error('IndexedDB 없음'));
+        var req = indexedDB.open(NAME, VER);
+        req.onupgradeneeded = function () {
+          var db = req.result;
+          if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+        };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+      return dbp;
+    }
+
+    function tx(mode, fn) {
+      return open().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var t = db.transaction(STORE, mode);
+          var out = fn(t.objectStore(STORE));
+          t.oncomplete = function () { resolve(out && out.result); };
+          t.onerror = function () { reject(t.error); };
+          t.onabort = function () { reject(t.error); };
+        });
+      });
+    }
+
+    return {
+      // 사진은 통째로 갈아끼운다. 몇 장 안 되고, 순서가 곧 대표 순서라
+      // 부분 갱신을 하면 순서가 어긋날 위험만 는다.
+      put: function (key, blobs) {
+        return tx('readwrite', function (s) { s.put(blobs, key); })
+          .catch(function () {});   // 초안 저장은 실패해도 입력을 막지 않는다
+      },
+      get: function (key) {
+        return tx('readonly', function (s) { return s.get(key); })
+          .then(function (v) { return Array.isArray(v) ? v : []; })
+          .catch(function () { return []; });
+      },
+      clear: function (key) {
+        return tx('readwrite', function (s) { s.delete(key); }).catch(function () {});
+      },
+    };
+  })();
+
   window.RV_APP = RV_APP;
   window.RV_UTIL = RV_UTIL;
   window.RV_DB = RV_DB;
   window.RV_AI = RV_AI;
   window.RV_ZIP = RV_ZIP;
   window.RV_BACKUP = RV_BACKUP;
+  window.RV_DRAFT = RV_DRAFT;
 })();

@@ -42,8 +42,11 @@
 // ---------------------------------------------------------------
 var LEATHER = [
   // ---------- 매출원가 (Part III) ----------
-  { key: 'cogs_material', group: 'cogs', line: '36',
-    ko: '가죽 · 원자재', en: 'Purchases (COGS)', deduct: 1,
+  // 36번(Purchases)은 "사서 그대로 되파는 물건" 자리다.
+  // 제니는 가죽을 사서 가방을 만드니까, 원자재는 38번(Materials and supplies)이 맞다.
+  // 나중에 완제품을 떼다 파는 사업을 하면 그때 36번 분류를 따로 만든다.
+  { key: 'cogs_material', group: 'cogs', line: '38',
+    ko: '가죽 · 원자재', en: 'Materials and supplies (COGS)', deduct: 1,
     hint: '완성품에 들어가는 가죽, 원단 등 주재료' },
 
   { key: 'cogs_supplies', group: 'cogs', line: '38',
@@ -57,7 +60,8 @@ var LEATHER = [
 
   { key: 'equipment', group: 'expense', line: '13',
     ko: '장비 구입', en: 'Depreciation / Section 179', deduct: 1,
-    hint: '재봉기, 재단기처럼 오래 쓰는 장비. 감가상각 대상이라 따로 모음' },
+    hint: '재봉기, 재단기처럼 오래 쓰는 장비. 13번은 Form 4562 로 계산한 값이 들어가는 ' +
+          '자리라, 여기 모인 금액은 "구입 내역"이지 그대로 공제되는 금액이 아니야' },
 
   { key: 'rent', group: 'expense', line: '20b',
     ko: '공방 임대료', en: 'Rent or lease — other business property', deduct: 1 },
@@ -104,17 +108,21 @@ var LEATHER = [
     ko: '차량 · 주유', en: 'Car and truck expenses', deduct: 1,
     hint: '개인 겸용이면 아래 사업 사용 비율을 꼭 낮춰서 넣을 것' },
 
-  { key: 'shipping', group: 'expense', line: '27a',
-    ko: '배송비', en: 'Other expenses — shipping', deduct: 1,
+  // 27a 는 "에너지효율 건물 공제(Form 7205)" 자리다. 여기 있으면 안 된다.
+  // 기타 경비는 Part V 에 항목별로 적고 그 합계가 27b 로 간다.
+  { key: 'shipping', group: 'expense', line: '27b',
+    ko: '배송비', en: 'Other expenses — shipping (Part V)', deduct: 1,
     hint: 'USPS, UPS, FedEx 발송비' },
 
-  { key: 'education', group: 'expense', line: '27a',
-    ko: '교육 · 워크숍', en: 'Other expenses — education', deduct: 1,
-    hint: '기술 향상을 위한 수업, 온라인 강의, 관련 도서' },
+  { key: 'education', group: 'expense', line: '27b',
+    ko: '교육 · 워크숍', en: 'Other expenses — education (Part V)', deduct: 1,
+    hint: '지금 하는 일의 기술을 높이는 수업. 새 업종에 들어가려고 듣는 ' +
+          '입문 과정은 공제가 안 되니 메모에 어떤 수업인지 적어둘 것' },
 
-  { key: 'other', group: 'expense', line: '27a',
-    ko: '기타', en: 'Other expenses', deduct: 1,
-    hint: '어디에도 안 맞으면 여기. 메모에 무엇인지 꼭 적어둘 것' },
+  { key: 'other', group: 'expense', line: '27b',
+    ko: '기타', en: 'Other expenses (Part V)', deduct: 1,
+    hint: '어디에도 안 맞으면 여기. Part V 에 항목별로 적어야 하니 ' +
+          '메모에 무엇인지 꼭 적어둘 것' },
 
   // ---------- 공제에서 빼는 것 ----------
   //
@@ -261,14 +269,23 @@ window.RV_PROFILES = {
       fileTag: '',
       intro: '세무사에게는 이 PDF 한 장과 CSV를 같이 보내면 돼.',
       sections: [
-        { group: 'cogs', h2: 'Part III — Cost of Goods Sold', total: 'Total cost of goods sold' },
+        // "Cost of goods sold" 라고 쓰면 안 된다. 42번 매출원가는
+        // 기초재고 + 매입 − 기말재고로 나오는데 이 앱은 재고를 안 센다.
+        // 연말에 남은 가죽까지 다 팔린 것처럼 잡히면 공제가 과다 계상된다.
+        { group: 'cogs', h2: 'Part III — Purchases and materials',
+          total: 'Total purchases and materials (before inventory adjustment)' },
         { group: 'expense', h2: 'Part II — Expenses', total: 'Total expenses' },
         { group: 'excluded', h2: 'Excluded — personal items (not claimed)',
           gross: true, total: 'Total excluded' },
       ],
-      grand: 'Total deductible, all categories',
+      // 이 페이지에서 제일 큰 숫자다. 그런데 이 숫자는 Schedule C 어느 줄도 아니다 —
+      // 재고 조정 전 매입액이 들어 있고, 13번 장비는 Form 4562 를 거쳐야 하고,
+      // 9번 차량은 마일리지 방식이면 주유비를 따로 못 뺀다.
+      // 이름을 정직하게 붙인다. 세무사가 그대로 옮겨 적으면 안 되는 값이다.
+      grand: 'Total recorded business outlay — not the Schedule C deduction',
       cumulative: false,
-      notes: ['deductibleAmounts', 'excluded', 'meals', 'mixedUse', 'equipment', 'car',
+      notes: ['grandCaveat', 'inventory', 'deductibleAmounts', 'excluded', 'meals',
+              'mixedUse', 'equipment', 'car', 'startup', 'aiReviewed',
               'notTrackedBusiness'],
       reviewedBy: 'taxpayer', reviewedBefore: 'filing',
     },

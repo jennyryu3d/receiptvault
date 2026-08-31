@@ -225,6 +225,24 @@ export default {
       return json({ error: 'image too large' }, 413, origin);
     }
 
+    // 사진 크기만 재고 나머지는 안 재고 있었다. 그런데 categories/countries 는
+    // 그대로 프롬프트에 들어간다 — 여기에 몇 MB 짜리 글자를 실어 보내면
+    // 한도는 "50장" 그대로인데 요금은 수백 배가 된다. 하루 한도는 장수를 세지
+    // 토큰을 세지 않기 때문이다. 그래서 들어오는 것마다 상한을 둔다.
+    const trim = (v, n) => (typeof v === 'string' ? v.slice(0, n) : null);
+    body.today = trim(body.today, 10);
+    body.kind = trim(body.kind, 20);
+    body.countries = trim(body.countries, 400);
+    if (!Array.isArray(body.categories)) {
+      body.categories = [];
+    } else {
+      body.categories = body.categories.slice(0, 40).map((c) => ({
+        key: trim(c && c.key, 40) || '',
+        label: trim(c && c.label, 120) || '',
+        hint: trim(c && c.hint, 200) || '',
+      }));
+    }
+
     // ---- 2. 사용량 한도 ----
     // 토큰이 진짜인지 확인하는 일과 오늘 몇 장 썼는지 세는 일을 한 번에 한다.
     // 토큰이 가짜면 auth.uid() 가 비어서 함수가 not_signed_in 을 돌려준다.
