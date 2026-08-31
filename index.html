@@ -356,6 +356,33 @@
   .rv-boot-fail{max-width:340px;padding:20px;text-align:left;display:flex;
                 flex-direction:column;gap:10px}
 
+  /* ---------- 대문 ----------
+     홈 화면에서 열면 앱이 뜨기까지 빈 화면이 잠깐 보인다. 그 자리를 이름으로 채운다.
+     아래에서는 진짜 화면이 이미 그려지고 있어서, 걷힐 때 완성된 화면이 드러난다. */
+  .rv-splash{position:fixed;inset:0;z-index:200;background:var(--bg);
+             display:flex;flex-direction:column;align-items:center;justify-content:center;
+             gap:0;opacity:1;transition:opacity .4s ease}
+  .rv-splash-out{opacity:0;pointer-events:none}
+  .rv-splash-in{display:flex;flex-direction:column;align-items:center;
+                animation:rv-rise .55s cubic-bezier(.2,.7,.3,1) both}
+  .rv-mark{display:block;border-radius:22%}
+  .rv-splash-name{margin-top:18px;font-size:26px;font-weight:700;letter-spacing:-.4px;
+                  color:var(--ink)}
+  .rv-splash-sub{margin-top:5px;font-size:13px;color:var(--muted);letter-spacing:.02em}
+  .rv-splash-foot{position:absolute;bottom:calc(28px + env(safe-area-inset-bottom));
+                  font-size:11px;color:var(--muted);opacity:.5}
+  @keyframes rv-rise{from{opacity:0;transform:translateY(10px) scale(.97)}
+                       to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){
+    .rv-splash{transition:none}
+    .rv-splash-in{animation:none}
+  }
+
+  /* 로그인 화면도 대문과 같은 얼굴로 이어지게 */
+  .rv-signin-head{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+  .rv-signin-head .rv-mark{flex:none}
+  .rv-signin-sub{margin:2px 0 0}
+
   /* ---------- 백업 ---------- */
   /* 지금 받아야 하는지를 색으로 먼저 말한다 */
   .rv-bkstate{font-size:13px;margin:10px 0;padding:10px 12px;border-radius:10px;

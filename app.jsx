@@ -96,6 +96,41 @@ function CategorySelect({ value, onChange, ledger }) {
 // 로그인 (비밀번호 없음 — 이메일로 링크가 온다)
 // =================================================================
 
+// 앱 표시. 대문과 로그인 화면이 같은 얼굴을 쓰도록 한 군데서 그린다.
+// icon.svg 를 <img> 로 부르지 않고 여기 그려 넣는다 — 파일을 따로 받으면
+// 그 순간 한 번 깜빡이고, 대문은 깜빡이면 안 되는 화면이다.
+function Mark({ size }) {
+  const s = size || 64;
+  return (
+    <svg className="rv-mark" viewBox="0 0 512 512" width={s} height={s} aria-hidden="true">
+      <rect width="512" height="512" rx="112" fill="var(--bg)" />
+      <path fill="var(--tan)" d="M146 108h220a10 10 0 0 1 10 10v268l-27.5-20-27.5 20-27.5-20-27.5 20-27.5-20-27.5 20-27.5-20-27.5 20-27.5-20-27.5 20V118a10 10 0 0 1 10-10z" />
+      <g fill="var(--bg)">
+        <rect x="182" y="168" width="148" height="18" rx="9" />
+        <rect x="182" y="216" width="112" height="14" rx="7" />
+        <rect x="182" y="256" width="128" height="14" rx="7" />
+        <rect x="182" y="296" width="90" height="14" rx="7" />
+      </g>
+    </svg>
+  );
+}
+
+// 대문. 홈 화면에서 열면 앱이 뜨기까지 잠깐 빈 화면이 보이는데,
+// 그 자리를 이름으로 채운다. 준비가 끝나면 스르르 사라진다.
+function Splash({ out }) {
+  return (
+    <div className={'rv-splash' + (out ? ' rv-splash-out' : '')} aria-hidden="true">
+      <div className="rv-splash-in">
+        <Mark size={104} />
+        <div className="rv-splash-name">ReceiptVault</div>
+        <div className="rv-splash-sub">영수증과 세금 자료</div>
+      </div>
+      <div className="rv-splash-foot">© {window.RV_CONFIG.COPYRIGHT_YEAR || 2026}{' '}
+        {window.RV_CONFIG.DEVELOPER || 'Jenny Ryu'}</div>
+    </div>
+  );
+}
+
 function SignIn() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
@@ -118,8 +153,14 @@ function SignIn() {
   return (
     <div className="rv-center">
       <div className="rv-card rv-signin">
-        <div className="rv-logo">ReceiptVault</div>
-        <p className="rv-muted">가죽공방 경비 · Schedule C 정리</p>
+        {/* 대문과 같은 얼굴로 이어지게. 로그인 화면이 대문의 다음 장처럼 보인다. */}
+        <div className="rv-signin-head">
+          <Mark size={54} />
+          <div>
+            <div className="rv-logo">ReceiptVault</div>
+            <p className="rv-muted rv-small rv-signin-sub">가죽공방 경비 · Schedule C 정리</p>
+          </div>
+        </div>
 
         {sent ? (
           <>
@@ -2571,6 +2612,21 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
     taxpayer_name: ledger.taxpayer_name || '',
   });
 
+  // 장부를 바꾸면 이 칸들도 그 장부 것으로 갈아끼운다.
+  //
+  // useState 의 초기값은 처음 한 번만 쓰인다. 그런데 설정 화면은 장부를 바꿔도
+  // 그대로 떠 있어서, 칸에는 이전 장부의 이름이 남아 있었다. 그 상태로 저장하면
+  // 공방 이름이 리모델링 장부에 덮어써졌다 — 두 장부가 이름을 공유하는 것처럼 보인 이유다.
+  useEffect(() => {
+    setFields({
+      name: ledger.name || '',
+      business_name: ledger.business_name || '',
+      taxpayer_name: ledger.taxpayer_name || '',
+    });
+    // 이전 장부에 대고 띄운 안내와 입력도 같이 치운다
+    setMsg(''); setErr(''); setEmail(''); setRole('editor'); setDropping(null);
+  }, [ledger.id]);
+
   const [quota, setQuota] = useState(null);
   const [diag, setDiag] = useState(null);
   const [diagOpen, setDiagOpen] = useState(false);   // 접어 둔 상태로 시작
@@ -3011,6 +3067,24 @@ function Settings({ session, ledger, members, isOwner, onReload }) {
 function App() {
   const [session, setSession] = useState(undefined); // undefined = 확인 중
   const [booting, setBooting] = useState(false);
+
+  // ---- 대문 ----
+  // 두 가지를 다 기다린다: 최소 표시 시간과 실제 준비 완료.
+  // 시간만 재면 준비가 늦을 때 대문 다음에 또 로딩이 뜨고,
+  // 준비만 보면 빠를 때 0.1초 번쩍이고 사라져서 오히려 지저분하다.
+  const [minDone, setMinDone] = useState(false);
+  const [splashGone, setSplashGone] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setMinDone(true), 900);
+    return () => clearTimeout(t);
+  }, []);
+  const bootBusy = booting || session === undefined;
+  const splashOut = minDone && !bootBusy;
+  useEffect(() => {
+    if (!splashOut || splashGone) return;
+    const t = setTimeout(() => setSplashGone(true), 420);  // 사라지는 시간과 맞춘다
+    return () => clearTimeout(t);
+  }, [splashOut, splashGone]);
   const [ledgers, setLedgers] = useState([]);
   const [ledgerId, setLedgerId] = useState(null);
   const [members, setMembers] = useState([]);
@@ -3159,10 +3233,17 @@ function App() {
 
   // 장부마다 앱 색이 바뀐다. 강조색 두 개만 갈아끼우면 화면 전체가 따라온다.
   const K = ledger ? window.RV_KIND(ledger.kind) : null;
+  // 대문은 모든 화면 위에 덮인다. 아래에서는 앱이 이미 그려지고 있어서,
+  // 대문이 걷힐 때는 이미 완성된 화면이 드러난다.
+  const withSplash = (node) => (
+    <>{node}{!splashGone && <Splash out={splashOut} />}</>
+  );
+
   const skin = (node) => (
     <div className="rv-root"
          style={K ? { '--tan': K.accent, '--tan-dim': K.accentDim } : undefined}>
       {node}
+      {!splashGone && <Splash out={splashOut} />}
     </div>
   );
 
@@ -3216,9 +3297,16 @@ function App() {
     );
   }
 
-  if (session === undefined) return <div className="rv-center"><Spinner /></div>;
-  if (session === null) return <SignIn />;
-  if (booting) return <div className="rv-center"><Spinner label="장부 여는 중..." /></div>;
+  // 대문이 아직 덮여 있으면 그 아래 로딩 표시는 보여줄 필요가 없다.
+  if (session === undefined) {
+    return splashGone ? <div className="rv-center"><Spinner /></div> : <Splash out={splashOut} />;
+  }
+  if (session === null) return withSplash(<SignIn />);
+  if (booting) {
+    return splashGone
+      ? <div className="rv-center"><Spinner label="장부 여는 중..." /></div>
+      : <Splash out={splashOut} />;
+  }
 
   // 장부를 못 불러온 채로 "장부 만들기" 화면을 띄우면, 자료가 멀쩡히 있는데도
   // 없는 줄 알고 하나를 더 만들게 된다. 그러면 진짜 장부는 안 보인 채로 남는다.
