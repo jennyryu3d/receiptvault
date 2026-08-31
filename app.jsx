@@ -832,6 +832,27 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
   }, [rec.currency, rec.purchased_at, rec.fx_source]);
 
   const originalAmount = U.parseAmount(rec.amount_original) || 0;
+
+  // ---- 같은 영수증을 두 번 넣었나 ----
+  //
+  // 날짜와 금액이 다 채워지는 순간 조용히 확인한다. 저장할 때 처음 알려주면
+  // 이미 다 입력한 뒤라 늦다. 사진을 찍자마자 알 수 있어야 손해가 없다.
+  const [dupes, setDupes] = useState([]);
+  const [dupeOk, setDupeOk] = useState(false);   // "그래도 저장" 을 눌렀나
+
+  useEffect(() => {
+    let alive = true;
+    setDupeOk(false);
+    if (!rec.purchased_at || !(originalAmount > 0)) { setDupes([]); return; }
+    // 타이핑 중에 매번 물어보지 않는다
+    const t = setTimeout(() => {
+      DB.findDupes(ledgerId, rec.purchased_at, originalAmount, rec.currency,
+                   editing ? initial.id : null)
+        .then((got) => { if (alive) setDupes(got); }, () => {});
+    }, 600);
+    return () => { alive = false; clearTimeout(t); };
+  }, [ledgerId, rec.purchased_at, originalAmount, rec.currency, editing]);
+
   const usdAmount = foreign
     ? originalAmount * (Number(rec.fx_rate) || 0)
     : originalAmount;
@@ -1129,6 +1150,13 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
       return setErr('분할한 줄 중에 금액이 빈 게 있어. 금액을 넣거나 그 줄을 지워줘.');
     }
 
+    // 중복이 보이는데 아직 확인 안 했으면 한 번 멈춘다. 두 번째로 누르면 저장된다.
+    if (dupes.length && !dupeOk) {
+      setDupeOk(true);
+      return setErr('같은 날 · 같은 금액 영수증이 이미 ' + dupes.length + '건 있어. ' +
+                    '진짜 다른 거래면 저장을 한 번 더 눌러줘.');
+    }
+
     if (splitting && remainder !== 0) {
       const cur = rec.currency || 'USD';
       return setErr(
@@ -1365,6 +1393,29 @@ function ReceiptForm({ initial, ledger, paymentRefs, merchants, session, onDone,
         </label>
         <p className="rv-muted rv-small">영수증에 찍힌 거래일이야. 목록도 이 날짜순으로 정렬돼.</p>
         {dateWarn && <Banner kind="warn">{dateWarn}</Banner>}
+
+        {/* 이미 넣은 영수증과 날짜·금액이 같을 때. 막지 않고 보여만 준다 —
+            같은 날 같은 가게에서 두 번 사는 일도 실제로 있으니까. */}
+        {dupes.length > 0 && (
+          <Banner kind="warn">
+            <div>
+              <strong>같은 날 · 같은 금액 영수증이 이미 있어.</strong> 이미 넣은 건 아닌지 봐줘.
+              <ul className="rv-dupes">
+                {dupes.map((d) => (
+                  <li key={d.id}>
+                    {d.merchant || '(가맹점 없음)'} · {U.inCurrency(U.originalTotal(d), d.currency)}
+                    {' · '}{window.RV_CAT(d.category).ko}
+                    {DB.imagePaths(d).length > 0 && ' · 사진 ' + DB.imagePaths(d).length + '장'}
+                    {d.notes ? <span className="rv-muted"> — {d.notes}</span> : null}
+                  </li>
+                ))}
+              </ul>
+              <span className="rv-muted rv-small">
+                진짜 다른 거래면 그냥 저장하면 돼. 저장을 누르면 한 번 더 물어봐.
+              </span>
+            </div>
+          </Banner>
+        )}
 
         <div className="rv-row">
           <label className="rv-label rv-grow"><L k="merchant" />

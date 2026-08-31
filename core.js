@@ -514,6 +514,28 @@
       return out;
     },
 
+    // 같은 영수증을 두 번 넣었는지 본다.
+    //
+    // 판단 기준은 "같은 날 + 같은 금액 + 같은 통화" 다. 가맹점 이름은 AI가 읽을 때마다
+    // 조금씩 달라질 수 있어서 조건에 넣지 않는다 — 대신 찾은 걸 화면에 보여주고
+    // 같은 건지는 사람이 판단하게 한다. 같은 날 같은 금액을 두 번 쓰는 일도
+    // 실제로 있으니까 막지는 않는다.
+    findDupes: async function (ledgerId, dateStr, amount, currency, excludeId) {
+      var c = supa();
+      if (!c || !ledgerId || !dateStr || !(Number(amount) > 0)) return [];
+      var q = c.from('receipts').select('*')
+               .eq('ledger_id', ledgerId)
+               .eq('purchased_at', dateStr)
+               .eq('currency', currency || 'USD');
+      if (excludeId) q = q.neq('id', excludeId);
+      var res = await q;
+      if (res.error) return [];
+      var want = Number(amount);
+      return (res.data || []).filter(function (r) {
+        return Math.abs(Number(r.amount_original) - want) < 0.005;
+      });
+    },
+
     save: async function (rec, ledgerId, session) {
       var c = need();
       if (!ledgerId) throw new Error('장부가 선택되지 않았어요.');
