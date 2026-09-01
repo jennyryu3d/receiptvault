@@ -1,0 +1,727 @@
+<title>바이블 프로젝트 6컷 보드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ground:#E8EAEE;
+    --panel:#FFFFFF;
+    --panel-2:#F3F5F8;
+    --ink:#141922;
+    --ink-2:#4E5765;
+    --ink-3:#79828F;
+    --line:#D2D7DE;
+    --line-2:#E4E7EC;
+    --warm:#9C6716;
+    --warm-ink:#7A4F0E;
+    --warm-soft:#F5E7CD;
+    --cold:#2A6579;
+    --cold-ink:#1E4C5C;
+    --cold-soft:#DBE9EF;
+    --frame:#DDE1E7;
+    --frame-line:#A9B2BE;
+    --shadow:0 1px 2px rgba(20,25,34,.06), 0 8px 24px -14px rgba(20,25,34,.28);
+
+    --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+    --serif:"Gowun Batang","Nanum Myeongjo","Apple SD Gothic Neo",Georgia,serif;
+    --mono:"IBM Plex Mono","SFMono-Regular",Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0B0E14;
+      --panel:#151A23;
+      --panel-2:#1B212B;
+      --ink:#E4E8EF;
+      --ink-2:#9AA4B4;
+      --ink-3:#78828F;
+      --line:#2A313D;
+      --line-2:#222932;
+      --warm:#E0AC58;
+      --warm-ink:#EFC77F;
+      --warm-soft:#3A2C15;
+      --cold:#6FB6CE;
+      --cold-ink:#95CEE1;
+      --cold-soft:#132C36;
+      --frame:#10151D;
+      --frame-line:#39424F;
+      --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px -16px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0B0E14;
+    --panel:#151A23;
+    --panel-2:#1B212B;
+    --ink:#E4E8EF;
+    --ink-2:#9AA4B4;
+    --ink-3:#78828F;
+    --line:#2A313D;
+    --line-2:#222932;
+    --warm:#E0AC58;
+    --warm-ink:#EFC77F;
+    --warm-soft:#3A2C15;
+    --cold:#6FB6CE;
+    --cold-ink:#95CEE1;
+    --cold-soft:#132C36;
+    --frame:#10151D;
+    --frame-line:#39424F;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px -16px rgba(0,0,0,.8);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-weight:400;
+    font-size:15px;
+    line-height:1.75;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:clamp(28px,5vw,64px) clamp(18px,4vw,40px) 96px}
+
+  /* ── slate / labels ───────────────────────── */
+  .slate{
+    font-family:var(--mono);
+    font-size:11px;
+    font-weight:500;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--ink-3);
+  }
+
+  /* ── masthead ─────────────────────────────── */
+  .masthead{display:flex;flex-direction:column;gap:14px;padding-bottom:26px;border-bottom:1px solid var(--line)}
+  .masthead h1{
+    font-family:var(--serif);
+    font-weight:700;
+    font-size:clamp(30px,5.2vw,50px);
+    line-height:1.18;
+    letter-spacing:-.01em;
+    margin:0;
+    text-wrap:balance;
+  }
+  .thesis{
+    font-family:var(--serif);
+    font-size:clamp(16px,2.1vw,19px);
+    line-height:1.85;
+    color:var(--ink-2);
+    max-width:60ch;
+    margin:0;
+  }
+  .thesis em{font-style:normal;color:var(--ink);box-shadow:inset 0 -.5em 0 var(--warm-soft)}
+  .meta-row{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center}
+
+  /* ── arc ribbon ───────────────────────────── */
+  .arc{
+    margin-top:34px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:3px;
+    padding:22px clamp(14px,3vw,26px) 16px;
+    box-shadow:var(--shadow);
+  }
+  .arc-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:10px}
+  .arc-note{font-size:12.5px;color:var(--ink-3);line-height:1.6}
+  .arc-scroll{overflow-x:auto;padding-bottom:4px}
+  .arc svg{display:block;width:100%;min-width:620px;height:auto}
+
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2)}
+  .legend span{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2)}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .dot.cold{background:var(--cold)}
+  .dot.warm{background:var(--warm)}
+
+  /* ── section ──────────────────────────────── */
+  section{margin-top:clamp(44px,7vw,76px)}
+  .sec-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h2{
+    font-family:var(--serif);
+    font-weight:700;
+    font-size:clamp(21px,3vw,27px);
+    line-height:1.4;
+    margin:0;
+    letter-spacing:-.005em;
+  }
+  .sec-sub{color:var(--ink-2);font-size:14.5px;max-width:62ch;margin:0 0 22px;line-height:1.8}
+
+  /* ── premise cards ────────────────────────── */
+  .premises{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(258px,1fr))}
+  .premise{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-left:2px solid var(--warm);
+    border-radius:2px;
+    padding:18px 20px 20px;
+    display:flex;flex-direction:column;gap:9px;
+  }
+  .premise h3{font-family:var(--serif);font-weight:700;font-size:17px;line-height:1.5;margin:0}
+  .premise p{margin:0;font-size:13.5px;line-height:1.8;color:var(--ink-2)}
+  .premise .why{
+    font-size:12.5px;line-height:1.75;color:var(--ink-3);
+    padding-top:9px;border-top:1px dashed var(--line);
+  }
+
+  /* ── cut cards ────────────────────────────── */
+  .cuts{display:flex;flex-direction:column;gap:20px}
+  .cut{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:3px;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .cut-slate{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:11px clamp(14px,2.4vw,22px);
+    background:var(--panel-2);
+    border-bottom:1px solid var(--line);
+  }
+  .cut-no{
+    font-family:var(--mono);font-weight:500;font-size:19px;letter-spacing:.02em;
+    color:var(--ink);font-variant-numeric:tabular-nums;
+  }
+  .chip{
+    font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;
+    padding:3px 9px;border-radius:2px;white-space:nowrap;
+  }
+  .chip.cold{background:var(--cold-soft);color:var(--cold-ink)}
+  .chip.warm{background:var(--warm-soft);color:var(--warm-ink)}
+  .cut-slate .spacer{flex:1 1 auto;min-width:0}
+  .cut-body{
+    display:grid;
+    grid-template-columns:minmax(0,360px) minmax(0,1fr);
+    gap:clamp(18px,3vw,32px);
+    padding:clamp(18px,2.6vw,26px) clamp(14px,2.4vw,22px);
+    align-items:start;
+  }
+  @media (max-width:760px){ .cut-body{grid-template-columns:minmax(0,1fr)} }
+
+  .frame{width:100%;background:var(--frame);border:1px solid var(--line);border-radius:2px;display:block}
+  .frame-cap{
+    margin-top:8px;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+    color:var(--ink-3);text-transform:uppercase;line-height:1.6;
+  }
+
+  .cut h3{
+    font-family:var(--serif);font-weight:700;
+    font-size:clamp(20px,2.7vw,24px);line-height:1.45;margin:0 0 10px;
+    letter-spacing:-.005em;text-wrap:balance;
+  }
+  .logline{
+    font-family:var(--serif);font-size:16px;line-height:1.9;color:var(--ink);
+    margin:0 0 20px;max-width:56ch;
+  }
+  dl{display:grid;gap:14px;margin:0}
+  dt{
+    font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.11em;
+    text-transform:uppercase;color:var(--ink-3);margin-bottom:3px;
+  }
+  dd{margin:0;font-size:13.5px;line-height:1.85;color:var(--ink-2);max-width:60ch}
+  dd strong{color:var(--ink);font-weight:500}
+
+  .puzzle{
+    margin-top:18px;padding:13px 16px;
+    background:var(--cold-soft);border-radius:2px;
+    font-size:13px;line-height:1.8;color:var(--cold-ink);
+  }
+  .puzzle b{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;display:block;margin-bottom:4px;font-weight:500;opacity:.85}
+
+  /* ── ladder ───────────────────────────────── */
+  .ladder{display:grid;gap:0;border:1px solid var(--line);border-radius:3px;overflow:hidden;background:var(--panel)}
+  .rung{display:grid;grid-template-columns:120px minmax(0,1fr);gap:clamp(14px,3vw,28px);padding:20px clamp(16px,2.6vw,24px);border-bottom:1px solid var(--line-2)}
+  .rung:last-child{border-bottom:0}
+  .rung.now{background:var(--panel-2)}
+  @media (max-width:620px){ .rung{grid-template-columns:minmax(0,1fr);gap:8px} }
+  .rung-n{font-family:var(--mono);font-size:26px;font-weight:500;line-height:1.2;color:var(--ink);font-variant-numeric:tabular-nums}
+  .rung.now .rung-n{color:var(--warm)}
+  .rung-n small{display:block;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);margin-top:3px;font-weight:500}
+  .rung h3{font-family:var(--serif);font-size:17px;font-weight:700;margin:0 0 6px;line-height:1.5}
+  .rung p{margin:0;font-size:13.5px;line-height:1.85;color:var(--ink-2);max-width:62ch}
+
+  /* ── decisions ────────────────────────────── */
+  .decisions{display:grid;gap:12px;counter-reset:q}
+  .q{
+    background:var(--panel);border:1px solid var(--line);border-radius:2px;
+    padding:16px 20px;display:grid;gap:6px;
+  }
+  .q h3{font-family:var(--serif);font-size:16.5px;font-weight:700;margin:0;line-height:1.6}
+  .q p{margin:0;font-size:13px;line-height:1.8;color:var(--ink-2);max-width:62ch}
+  .q .opts{display:flex;flex-wrap:wrap;gap:7px;margin-top:5px}
+  .opt{
+    font-family:var(--mono);font-size:11px;letter-spacing:.04em;
+    border:1px solid var(--line);border-radius:2px;padding:3px 9px;color:var(--ink-2);
+  }
+  .opt.lean{border-color:var(--warm);color:var(--warm-ink);background:var(--warm-soft)}
+
+  footer{
+    margin-top:clamp(48px,7vw,80px);padding-top:22px;border-top:1px solid var(--line);
+    font-size:12.5px;line-height:1.85;color:var(--ink-3);max-width:64ch;
+  }
+  footer b{color:var(--ink-2);font-weight:500}
+
+  .reveal{opacity:0;transform:translateY(10px);animation:rise .6s cubic-bezier(.2,.7,.3,1) forwards}
+  @keyframes rise{to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){
+    .reveal{animation:none;opacity:1;transform:none}
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead reveal">
+    <div class="meta-row">
+      <span class="slate">인터랙티브 무비 · 기획 보드</span>
+      <span class="slate">DRAFT v0.1 · 2026-08-31</span>
+    </div>
+    <h1>바이블 프로젝트 6컷 보드</h1>
+    <p class="thesis">
+      전체를 한 화면에서 붙잡기 위한 최소 단위. 여섯 컷이 <em>감동적이지 않으면</em>
+      12컷도 24컷도 그 감동을 만들어내지 못합니다. 그래서 먼저 이 여섯 개만 붙잡습니다.
+    </p>
+  </header>
+
+  <div class="arc reveal" style="animation-delay:.08s">
+    <div class="arc-head">
+      <span class="slate">감정 곡선 · 6컷</span>
+      <span class="arc-note">세로축은 정서적 압력. 5컷에서 한 번만 최대치로 올립니다.</span>
+    </div>
+    <div class="arc-scroll">
+      <svg viewBox="0 0 960 172" role="img" aria-label="6컷의 감정 곡선. 1컷 낮게 시작해 2컷에서 오르고 3컷에서 잠시 내려앉은 뒤 4컷에서 다시 오르고 5컷에서 최고점, 6컷에서 조용히 내려앉습니다.">
+        <defs>
+          <linearGradient id="arcFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-opacity=".22" style="stop-color:var(--warm)"/>
+            <stop offset="100%" stop-opacity="0" style="stop-color:var(--warm)"/>
+          </linearGradient>
+        </defs>
+        <line x1="40" y1="140" x2="920" y2="140" stroke-width="1" style="stroke:var(--line)"/>
+        <path d="M70 100 L234 68 L398 85 L562 58 L726 30 L890 96 L890 140 L70 140 Z" fill="url(#arcFill)"/>
+        <polyline points="70,100 234,68 398,85 562,58 726,30 890,96"
+                  fill="none" stroke-width="1.75"
+                  stroke-linejoin="round" stroke-linecap="round" style="stroke:var(--warm)"/>
+
+        <g font-family="IBM Plex Mono, monospace" font-size="12" text-anchor="middle" style="fill:var(--ink-3)">
+          <circle cx="70"  cy="100" r="5.5" style="fill:var(--cold)"/>
+          <circle cx="234" cy="68"  r="5.5" style="fill:var(--cold)"/>
+          <circle cx="398" cy="85"  r="5.5" style="fill:var(--warm)"/>
+          <circle cx="562" cy="58"  r="5.5" style="fill:var(--warm)"/>
+          <circle cx="726" cy="30"  r="7" style="fill:var(--warm)"/>
+          <circle cx="890" cy="96"  r="5.5" style="fill:var(--cold)"/>
+          <text x="70"  y="160">01</text>
+          <text x="234" y="160">02</text>
+          <text x="398" y="160">03</text>
+          <text x="562" y="160">04</text>
+          <text x="726" y="160">05</text>
+          <text x="890" y="160">06</text>
+        </g>
+        <g font-family="IBM Plex Sans KR, sans-serif" font-size="12.5" text-anchor="middle" style="fill:var(--ink-2)">
+          <text x="70"  y="88">부재</text>
+          <text x="234" y="56">낙하</text>
+          <text x="398" y="73">목격</text>
+          <text x="562" y="46">유혹</text>
+          <text x="726" y="17" font-weight="500" style="fill:var(--warm)">절정</text>
+          <text x="890" y="84">귀환</text>
+        </g>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="dot cold"></i> 미래 — 차가운 광원, 무채색, 정적</span>
+      <span><i class="dot warm"></i> 과거 — 등불·태양광, 흙과 천, 소음</span>
+      <span style="color:var(--ink-3)">두 세계는 색온도만으로 구분됩니다. 자막이나 설명 없이.</span>
+    </div>
+  </div>
+
+  <!-- ───────── 전제 ───────── -->
+  <section>
+    <div class="sec-head"><h2>이 보드가 깔고 있는 전제</h2></div>
+    <p class="sec-sub">
+      아래 셋 중 하나라도 생각과 다르면, 여섯 컷은 전부 다시 짜야 합니다.
+      그래서 컷보다 먼저 놓습니다. 셋 다 <strong>제 제안</strong>이지 결정이 아닙니다.
+    </p>
+    <div class="premises">
+      <div class="premise">
+        <h3>미래 캐릭터는 참여자가 아니라 목격자다</h3>
+        <p>과거로 들어가지만 성경 사건의 결과를 <strong>바꾸지 못합니다.</strong> 바꾸는 것은 세계가 아니라 자기 자신의 이해입니다.</p>
+        <p class="why">왜: 결과를 바꿀 수 있게 하면 성경이 게임 소재가 됩니다. 교회 안에서도 밖에서도 방어가 안 되고, 무엇보다 원본 이야기의 무게가 사라집니다. 목격자로 두면 "감동적인 애니메이션"이라는 목표와도 정면으로 맞습니다.</p>
+      </div>
+      <div class="premise">
+        <h3>퍼즐의 보상은 진행이 아니라 시야다</h3>
+        <p>퍼즐을 풀면 다음 장면으로 넘어가는 게 아니라, <strong>같은 장면이 다르게 보입니다.</strong> 못 풀어도 이야기는 흐릅니다.</p>
+        <p class="why">왜: 퍼즐이 진행의 관문이면 감정선이 끊깁니다. 눈물 흘리기 직전에 막히는 경험만큼 이 장르에 치명적인 게 없습니다. 대신 보상을 '숨겨진 시점'으로 주면, 잘하는 사람은 더 깊게 보고 못하는 사람도 끝까지 봅니다.</p>
+      </div>
+      <div class="premise">
+        <h3>한 에피소드 = 한 사건 = 약 50분</h3>
+        <p>성경 전체를 한 작품에 담지 않습니다. <strong>시즌제</strong>로 갑니다. 6컷 보드는 파일럿 한 편의 골격입니다.</p>
+        <p class="why">왜: 방대함이 이 프로젝트의 가장 큰 위험입니다. 완결 가능한 50분짜리 하나를 먼저 끝까지 만들어야 두 번째가 존재합니다. 프레임 서사(미래 캐릭터)는 시즌을 묶는 실이 됩니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── 6컷 ───────── -->
+  <section>
+    <div class="sec-head"><h2>여섯 컷</h2><span class="slate">파일럿 · 총 50분</span></div>
+    <p class="sec-sub">
+      주인공 이름 '하란', 그리고 5컷의 성경 사건은 <strong>자리 표시용</strong>입니다.
+      구조를 보여주려고 채워 넣은 것이니, 실제 방향을 알려주시면 그 자리에 넣겠습니다.
+    </p>
+
+    <div class="cuts">
+
+      <!-- CUT 01 -->
+      <article class="cut">
+        <div class="cut-slate">
+          <span class="cut-no">01</span>
+          <span class="chip cold">미래</span>
+          <span class="spacer"></span>
+          <span class="slate">WIDE → SLOW PUSH IN</span>
+          <span class="slate">약 8분</span>
+        </div>
+        <div class="cut-body">
+          <div>
+            <svg class="frame" viewBox="0 0 383 160" role="img" aria-label="구도 스케치: 극단적인 와이드. 거대한 수직 서가 사이 화면 하단 중앙에 아주 작은 인물. 카메라는 천천히 전진.">
+              <g stroke-width=".5" opacity=".35" style="stroke:var(--frame-line)">
+                <line x1="127.7" y1="0" x2="127.7" y2="160"/><line x1="255.3" y1="0" x2="255.3" y2="160"/>
+                <line x1="0" y1="53.3" x2="383" y2="53.3"/><line x1="0" y1="106.7" x2="383" y2="106.7"/>
+              </g>
+              <g fill="none" stroke-width="1.4" opacity=".8" style="stroke:var(--cold)">
+                <rect x="34" y="16" width="40" height="112"/><rect x="86" y="8" width="40" height="120"/>
+                <rect x="257" y="8" width="40" height="120"/><rect x="309" y="16" width="40" height="112"/>
+              </g>
+              <line x1="0" y1="128" x2="383" y2="128" stroke-width="1" style="stroke:var(--frame-line)"/>
+              <rect x="188" y="112" width="7" height="16" style="fill:var(--cold)"/>
+              <g stroke-width="1.3" fill="none" style="stroke:var(--warm)">
+                <line x1="191" y1="150" x2="191" y2="136"/>
+                <path d="M186 141 L191 135 L196 141"/>
+              </g>
+            </svg>
+            <div class="frame-cap">EXT. WIDE · 인물 화면 높이 10% · PUSH IN 40초</div>
+          </div>
+          <div>
+            <h3>부재 — 아무도 읽지 않는 서고</h3>
+            <p class="logline">
+              모든 기록이 완벽하게 보존된 시대. 하란은 그 서고를 관리하지만, 지난 3년간 이곳에
+              사람이 다녀간 적이 없다.
+            </p>
+            <dl>
+              <dt>보이는 것</dt>
+              <dd>무채색. 먼지 한 톨 없는 완벽함. <strong>따뜻한 색이 단 하나도 없는 8분</strong>을 견디게 만듭니다. 관객이 2컷의 첫 햇빛에서 숨을 쉬도록.</dd>
+              <dt>들리는 것</dt>
+              <dd>공조기의 저역 웅웅거림. 발소리. 음악 없음. 사람 목소리 없음.</dd>
+              <dt>플레이어가 하는 것</dt>
+              <dd>걷기와 보기만. 조작 학습 구간이자, <strong>이 세계가 얼마나 조용한지</strong>를 몸으로 재는 구간.</dd>
+              <dt>이 컷이 감당하는 것</dt>
+              <dd>작품 전체의 질문을 심습니다 — <em>보존되었는데 왜 아무것도 남지 않았는가.</em> 이 질문이 6컷에서 대답됩니다.</dd>
+            </dl>
+          </div>
+        </div>
+      </article>
+
+      <!-- CUT 02 -->
+      <article class="cut">
+        <div class="cut-slate">
+          <span class="cut-no">02</span>
+          <span class="chip cold">미래</span>
+          <span class="chip warm">과거</span>
+          <span class="spacer"></span>
+          <span class="slate">MATCH CUT · 무편집 진입</span>
+          <span class="slate">약 6분</span>
+        </div>
+        <div class="cut-body">
+          <div>
+            <svg class="frame" viewBox="0 0 383 160" role="img" aria-label="구도 스케치: 화면이 세로로 반 갈라져 왼쪽은 차가운 격자, 오른쪽은 따뜻한 지평선과 인물. 두 화면이 같은 구도로 이어지는 매치 컷.">
+              <rect x="0" y="0" width="191" height="160" opacity=".08" style="fill:var(--cold)"/>
+              <rect x="192" y="0" width="191" height="160" opacity=".1" style="fill:var(--warm)"/>
+              <g stroke-width="1.2" fill="none" opacity=".85" style="stroke:var(--cold)">
+                <rect x="30" y="34" width="58" height="92"/><rect x="104" y="34" width="58" height="92"/>
+              </g>
+              <line x1="0" y1="126" x2="191" y2="126" style="stroke:var(--frame-line)"/>
+              <line x1="192" y1="112" x2="383" y2="112" stroke-width="1.2" style="stroke:var(--warm)"/>
+              <circle cx="330" cy="52" r="17" opacity=".45" style="fill:var(--warm)"/>
+              <rect x="252" y="94" width="8" height="18" style="fill:var(--warm)"/>
+              <line x1="191.5" y1="0" x2="191.5" y2="160" stroke-width="1" stroke-dasharray="3 4" style="stroke:var(--frame-line)"/>
+            </svg>
+            <div class="frame-cap">MATCH CUT · 동일 프레임 위치 · 색온도만 3200K 이동</div>
+          </div>
+          <div>
+            <h3>낙하 — 설명 없이 도착한다</h3>
+            <p class="logline">
+              복원 불가 판정을 받은 문서 하나를 하란이 펼친다. 다음 프레임, 그는 이미 그곳에 서 있다.
+              어떻게 왔는지에 대한 설명은 끝까지 나오지 않는다.
+            </p>
+            <dl>
+              <dt>보이는 것</dt>
+              <dd>같은 화면 구도, 다른 세계. <strong>시간여행 장치도, 빛의 소용돌이도 없습니다.</strong> 컷 하나로 건너갑니다.</dd>
+              <dt>들리는 것</dt>
+              <dd>1컷의 공조기 소리가 잘리고 그 자리를 바람·짐승·사람 소리가 한꺼번에 채웁니다. 작품 첫 음악이 여기서 들어옵니다.</dd>
+              <dt>플레이어가 하는 것</dt>
+              <dd>아무것도. <strong>이 6분은 온전히 보게 둡니다.</strong> 조작이 돌아오는 순간을 3컷까지 미룹니다.</dd>
+              <dt>이 컷이 감당하는 것</dt>
+              <dd>장르 선언. 여기서 SF 설정을 설명하기 시작하면 작품이 SF가 되고, 성경은 배경이 됩니다. 설명하지 않는 선택이 곧 <em>무엇이 주인공인지</em>에 대한 선언입니다.</dd>
+            </dl>
+          </div>
+        </div>
+      </article>
+
+      <!-- CUT 03 -->
+      <article class="cut">
+        <div class="cut-slate">
+          <span class="cut-no">03</span>
+          <span class="chip warm">과거</span>
+          <span class="spacer"></span>
+          <span class="slate">MID · 핸드헬드 · 군중 속</span>
+          <span class="slate">약 10분</span>
+        </div>
+        <div class="cut-body">
+          <div>
+            <svg class="frame" viewBox="0 0 383 160" role="img" aria-label="구도 스케치: 군중 여러 명이 화면 중앙 사건을 향하고, 주인공만 홀로 화면 앞쪽 가장자리에서 등을 보인 채 서 있음.">
+              <line x1="0" y1="118" x2="383" y2="118" style="stroke:var(--frame-line)"/>
+              <g opacity=".4" style="fill:var(--warm)">
+                <rect x="120" y="72" width="9" height="46"/><rect x="142" y="66" width="9" height="52"/>
+                <rect x="164" y="70" width="9" height="48"/><rect x="188" y="64" width="9" height="54"/>
+                <rect x="211" y="70" width="9" height="48"/><rect x="233" y="68" width="9" height="50"/>
+              </g>
+              <circle cx="180" cy="44" r="21" opacity=".28" style="fill:var(--warm)"/>
+              <rect x="46" y="76" width="13" height="66" style="fill:var(--cold)"/>
+              <g stroke-width=".9" stroke-dasharray="4 4" fill="none" style="stroke:var(--frame-line)">
+                <line x1="59" y1="96" x2="115" y2="86"/>
+              </g>
+            </svg>
+            <div class="frame-cap">MID · 주인공은 항상 프레임 가장자리 · 결코 중앙에 두지 않음</div>
+          </div>
+          <div>
+            <h3>목격 — 이름 없는 자리</h3>
+            <p class="logline">
+              성경 사건이 하란 앞에서 벌어진다. 아무도 그를 보지 않는다. 그는 이 이야기에
+              등장하지 않는 사람이고, 그래서 자유롭게 볼 수 있다.
+            </p>
+            <dl>
+              <dt>보이는 것</dt>
+              <dd>구도 규칙이 여기서 정해집니다 — <strong>하란은 절대 화면 중앙에 오지 않습니다.</strong> 중앙은 성경 인물의 자리입니다. 이 규칙을 24컷까지 지킵니다.</dd>
+              <dt>들리는 것</dt>
+              <dd>고대 언어. 자막은 있지만 <strong>더빙하지 않습니다.</strong> 관객도 하란처럼 반쯤만 알아듣는 자리에 둡니다.</dd>
+              <dt>플레이어가 하는 것</dt>
+              <dd>시점 이동. 군중 사이를 옮겨 다니며 <strong>같은 사건을 다른 각도에서</strong> 봅니다. 여기서 첫 번째 퍼즐 구조가 열립니다.</dd>
+              <dt>이 컷이 감당하는 것</dt>
+              <dd>성경 본문을 각색 없이 통째로 통과시키는 구간. 작품에서 가장 '순수하게 성경만' 있는 10분입니다.</dd>
+            </dl>
+            <div class="puzzle">
+              <b>퍼즐 · 관찰형</b>
+              군중 속 인물들의 시선·소지품·대화 조각을 모아 이 사건의 <strong>배경</strong>을 재구성합니다.
+              풀면 3컷을 한 번 더 볼 때 자막이 늘어나고, 안 풀어도 4컷으로 넘어갑니다.
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- CUT 04 -->
+      <article class="cut">
+        <div class="cut-slate">
+          <span class="cut-no">04</span>
+          <span class="chip warm">과거</span>
+          <span class="spacer"></span>
+          <span class="slate">CU · 고정 · 얕은 심도</span>
+          <span class="slate">약 9분</span>
+        </div>
+        <div class="cut-body">
+          <div>
+            <svg class="frame" viewBox="0 0 383 160" role="img" aria-label="구도 스케치: 화면 오른쪽에 주인공의 클로즈업 옆얼굴, 왼쪽 흐린 배경에 손 뻗으면 닿을 거리의 인물. 둘 사이에 점선 경계.">
+              <rect x="0" y="0" width="383" height="160" opacity=".07" style="fill:var(--warm)"/>
+              <g opacity=".3" style="fill:var(--warm)"><rect x="66" y="46" width="20" height="80" rx="9"/><circle cx="76" cy="38" r="13"/></g>
+              <path d="M262 160 L262 66 Q262 34 296 34 L316 34 L316 160 Z" opacity=".55" style="fill:var(--cold)"/>
+              <line x1="180" y1="8" x2="180" y2="152" stroke-width="1" stroke-dasharray="3 5" style="stroke:var(--frame-line)"/>
+              <g stroke-width="1.3" fill="none" style="stroke:var(--warm)">
+                <line x1="252" y1="96" x2="196" y2="96"/><path d="M203 90 L195 96 L203 102"/>
+              </g>
+            </svg>
+            <div class="frame-cap">CU · 손 닿는 거리 · 배경 완전 아웃포커스 · 카메라 고정</div>
+          </div>
+          <div>
+            <h3>유혹 — 손을 뻗으면 닿는다</h3>
+            <p class="logline">
+              하란은 이 이야기의 결말을 알고 있다. 그리고 지금, 한 사람이 손 닿는 거리에 있다.
+              한 마디만 하면 그가 겪을 일을 막을 수 있다.
+            </p>
+            <dl>
+              <dt>보이는 것</dt>
+              <dd>작품에서 카메라가 <strong>유일하게 완전히 멈추는 구간.</strong> 앞뒤가 전부 핸드헬드라서, 이 정지가 압력이 됩니다.</dd>
+              <dt>들리는 것</dt>
+              <dd>음악이 빠집니다. 호흡 소리만. 3컷에서 쌓아 올린 소음을 여기서 전부 걷어냅니다.</dd>
+              <dt>플레이어가 하는 것</dt>
+              <dd><strong>선택을 제시하되, 어느 쪽을 골라도 결과는 같습니다.</strong> 개입하려 해도 말이 나오지 않거나, 손이 닿지 않습니다. 이건 속임수가 아니라 이 작품의 규칙을 몸으로 알려주는 유일한 방법입니다.</dd>
+              <dt>이 컷이 감당하는 것</dt>
+              <dd>전제 ①을 관객이 <em>납득</em>하는 지점. 설명이 아니라 실패로 배우게 합니다. 여기서 관객이 화를 내면 성공입니다 — 그 감정이 5컷의 연료가 됩니다.</dd>
+            </dl>
+            <div class="puzzle">
+              <b>퍼즐 · 없음 (의도적)</b>
+              이 9분에는 어떤 게임 요소도 넣지 않습니다. 풀 수 있는 것이 있으면 관객은 무력감 대신 과제를 느낍니다.
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- CUT 05 -->
+      <article class="cut">
+        <div class="cut-slate">
+          <span class="cut-no">05</span>
+          <span class="chip warm">과거</span>
+          <span class="spacer"></span>
+          <span class="slate">WIDE → CU · 원 테이크</span>
+          <span class="slate">약 12분 · 최대 물량</span>
+        </div>
+        <div class="cut-body">
+          <div>
+            <svg class="frame" viewBox="0 0 383 160" role="img" aria-label="구도 스케치: 화면 중앙에 강한 광원과 인물, 주변이 방사형으로 밝아짐. 주인공은 화면 맨 아래 가장자리 실루엣.">
+              <defs>
+                <radialGradient id="g5" cx="50%" cy="42%" r="58%">
+                  <stop offset="0%" stop-opacity=".55" style="stop-color:var(--warm)"/>
+                  <stop offset="100%" stop-opacity="0" style="stop-color:var(--warm)"/>
+                </radialGradient>
+              </defs>
+              <rect x="0" y="0" width="383" height="160" fill="url(#g5)"/>
+              <line x1="0" y1="122" x2="383" y2="122" style="stroke:var(--frame-line)"/>
+              <g style="fill:var(--warm)"><rect x="185" y="52" width="13" height="70"/><circle cx="191.5" cy="44" r="11"/></g>
+              <g opacity=".25" style="fill:var(--warm)">
+                <rect x="98" y="86" width="8" height="36"/><rect x="128" y="90" width="8" height="32"/>
+                <rect x="248" y="90" width="8" height="32"/><rect x="278" y="86" width="8" height="36"/>
+              </g>
+              <rect x="20" y="132" width="11" height="28" style="fill:var(--cold)"/>
+            </svg>
+            <div class="frame-cap">ONE TAKE 12MIN · 중앙 = 성경 인물 · 주인공은 하단 실루엣</div>
+          </div>
+          <div>
+            <h3>절정 — 바꿀 수 없는 것</h3>
+            <p class="logline">
+              그 일이 일어난다. 하란은 막지 못했고, 앞으로도 막지 못할 것이다.
+              그는 화면 맨 아래 구석에서, 관객과 같은 자세로 그것을 본다.
+            </p>
+            <dl>
+              <dt>보이는 것</dt>
+              <dd>프로젝트 전체 예산과 인력의 <strong>가장 큰 몫이 이 12분에 들어갑니다.</strong> 나머지를 아껴서라도. 사람들이 기억하고 남에게 이야기하는 건 이 12분입니다.</dd>
+              <dt>들리는 것</dt>
+              <dd>작품에서 유일하게 <strong>대규모 편성</strong>이 쓰이는 구간. 1~4컷에서 음악을 아껴온 이유가 여기서 회수됩니다.</dd>
+              <dt>플레이어가 하는 것</dt>
+              <dd>UI 전부 사라짐. 조작 없음. <strong>일시정지도 막습니다.</strong> 12분을 통째로 견디게 합니다.</dd>
+              <dt>이 컷이 감당하는 것</dt>
+              <dd>이 작품이 존재하는 이유. 나머지 다섯 컷은 전부 이 12분을 위한 준비이거나 정리입니다. <em>여기서 울지 않으면 이 기획은 실패입니다.</em></dd>
+            </dl>
+          </div>
+        </div>
+      </article>
+
+      <!-- CUT 06 -->
+      <article class="cut">
+        <div class="cut-slate">
+          <span class="cut-no">06</span>
+          <span class="chip cold">미래</span>
+          <span class="spacer"></span>
+          <span class="slate">1컷과 동일 프레임 · 정지</span>
+          <span class="slate">약 5분</span>
+        </div>
+        <div class="cut-body">
+          <div>
+            <svg class="frame" viewBox="0 0 383 160" role="img" aria-label="구도 스케치: 1컷과 완전히 같은 서고 구도. 다만 인물 옆에 작고 따뜻한 광점 하나가 켜져 있음.">
+              <g stroke-width=".5" opacity=".35" style="stroke:var(--frame-line)">
+                <line x1="127.7" y1="0" x2="127.7" y2="160"/><line x1="255.3" y1="0" x2="255.3" y2="160"/>
+                <line x1="0" y1="53.3" x2="383" y2="53.3"/><line x1="0" y1="106.7" x2="383" y2="106.7"/>
+              </g>
+              <g fill="none" stroke-width="1.4" opacity=".8" style="stroke:var(--cold)">
+                <rect x="34" y="16" width="40" height="112"/><rect x="86" y="8" width="40" height="120"/>
+                <rect x="257" y="8" width="40" height="120"/><rect x="309" y="16" width="40" height="112"/>
+              </g>
+              <line x1="0" y1="128" x2="383" y2="128" stroke-width="1" style="stroke:var(--frame-line)"/>
+              <rect x="188" y="112" width="7" height="16" style="fill:var(--cold)"/>
+              <circle cx="205" cy="120" r="4.5" style="fill:var(--warm)"/>
+              <circle cx="205" cy="120" r="13" opacity=".18" style="fill:var(--warm)"/>
+            </svg>
+            <div class="frame-cap">1컷과 동일 렌즈·동일 위치 · 유일한 차이는 따뜻한 광원 하나</div>
+          </div>
+          <div>
+            <h3>귀환 — 바뀐 것은 나 하나</h3>
+            <p class="logline">
+              서고는 그대로다. 문서도, 먼지 없음도, 정적도. 하란만이 달라졌고,
+              그는 처음으로 그 문서를 소리 내어 읽는다.
+            </p>
+            <dl>
+              <dt>보이는 것</dt>
+              <dd>1컷과 <strong>픽셀 단위로 같은 화면.</strong> 관객이 "여기 아까 봤다"고 알아채는 순간, 차이 하나(작은 따뜻한 광원)가 보입니다.</dd>
+              <dt>들리는 것</dt>
+              <dd>공조기 소리가 돌아옵니다. 그 위에 처음으로 사람 목소리 — 하란이 읽는 소리.</dd>
+              <dt>플레이어가 하는 것</dt>
+              <dd>다시 조작이 돌아옵니다. 그리고 <strong>1컷에서 지나쳤던 것들이 이제 읽힙니다.</strong> 3컷 퍼즐을 푼 만큼 더 많이.</dd>
+              <dt>이 컷이 감당하는 것</dt>
+              <dd>1컷의 질문에 답합니다 — 보존은 읽는 사람이 있을 때만 보존입니다. 그리고 이 구조가 <em>다음 에피소드의 문</em>이 됩니다.</dd>
+            </dl>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ───────── 6 → 12 → 24 ───────── -->
+  <section>
+    <div class="sec-head"><h2>6 → 12 → 24</h2></div>
+    <p class="sec-sub">
+      각 단계는 이전 단계를 <strong>쪼개기만</strong> 합니다. 새 아이디어를 넣지 않습니다.
+      그래야 24컷이 되어도 6컷의 감정 곡선이 그대로 살아 있습니다.
+    </p>
+    <div class="ladder">
+      <div class="rung now">
+        <div class="rung-n">6<small>지금 여기</small></div>
+        <div>
+          <h3>골격 — 이게 감동적인가</h3>
+          <p>막 단위. 판단할 것은 단 하나: <strong>이 여섯 문장을 읽고 마음이 움직이는가.</strong> 안 움직이면 컷을 늘리지 않고 여섯 개를 다시 씁니다. 여기서 버리는 건 하루치, 24컷에서 버리는 건 한 달치입니다.</p>
+        </div>
+      </div>
+      <div class="rung">
+        <div class="rung-n">12<small>다음</small></div>
+        <div>
+          <h3>전환 — 왜 다음 컷으로 넘어가는가</h3>
+          <p>각 막을 둘로 나눕니다. 그러면 <strong>컷과 컷 사이의 이유</strong>가 드러납니다. 여기서 퍼즐이 몇 개이고 어디에 붙는지, 어떤 성경 본문이 몇 절부터 몇 절까지 들어가는지 확정합니다. 캐릭터 설정과 미술 레퍼런스가 붙기 시작하는 단계.</p>
+        </div>
+      </div>
+      <div class="rung">
+        <div class="rung-n">24<small>그 다음</small></div>
+        <div>
+          <h3>시퀀스 — 만들 수 있는 단위</h3>
+          <p>실제 촬영/렌더 단위. 컷 길이(초), 카메라 무브, 대사 유무, 필요한 에셋 목록이 붙습니다. <strong>여기부터는 문서가 아니라 데이터입니다</strong> — 표로 관리하고 언리얼 시퀀서·데이터테이블로 그대로 넘길 수 있습니다. 이 단계에서 제가 할 수 있는 일이 크게 늘어납니다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── 결정 ───────── -->
+  <section>
+    <div class="sec-head"><h2>12컷으로 가기 전에 정해야 할 것</h2></div>
+    <p class="sec-sub">넷뿐입니다. 표시된 쪽은 제 제안이고, 근거는 각 항목에 적었습니다.</p>
+    <div class="decisions">
+      <div class="q">
+        <h3>첫 에피소드의 성경 사건은 무엇인가</h3>
+        <p>5컷 12분을 감당할 수 있고, 4컷의 '개입하고 싶은 순간'이 명확한 사건이어야 합니다. 잘 알려져 있을수록 좋습니다 — 결말을 알면서 보는 무력감이 이 구조의 핵심이라서.</p>
+        <div class="opts"><span class="opt">요셉</span><span class="opt">출애굽</span><span class="opt">다니엘</span><span class="opt lean">십자가</span><span class="opt">그 외</span></div>
+      </div>
+      <div class="q">
+        <h3>하란은 말을 하는가</h3>
+        <p>내레이션이 있으면 감정을 안내할 수 있지만, 관객이 스스로 느낄 여지가 줄어듭니다. 침묵하면 연출 난이도가 크게 오르는 대신 완성도의 천장이 훨씬 높습니다.</p>
+        <div class="opts"><span class="opt">내레이터</span><span class="opt">최소한의 혼잣말</span><span class="opt lean">완전 침묵</span></div>
+      </div>
+      <div class="q">
+        <h3>주 관객은 교회 밖인가 안인가</h3>
+        <p>이 하나가 전제 ①을 뒤집을 수 있습니다. 교회 안이 주 관객이면 각색 여지가 좁아지고 본문 충실도가 최우선이 됩니다. 교회 밖이면 프레임 서사의 비중을 키워야 합니다.</p>
+        <div class="opts"><span class="opt">교회 밖 일반 관객</span><span class="opt">교회 안</span><span class="opt lean">교회 밖 우선 · 안에서도 방어 가능하게</span></div>
+      </div>
+      <div class="q">
+        <h3>미술 톤 — 사실적인가 양식화인가</h3>
+        <p>제작 규모를 가장 크게 좌우합니다. 사실적으로 가면 5컷 12분의 물량이 감당 가능한 수준을 넘을 수 있습니다. 양식화는 적은 인원으로 더 오래 버티게 해주고, 성경 소재에서 '재현'의 부담도 덜어줍니다.</p>
+        <div class="opts"><span class="opt">포토리얼</span><span class="opt lean">양식화 · 회화적</span><span class="opt">두 세계를 다른 톤으로</span></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <b>이 보드에 대해</b> — 이 페이지에는 댓글을 달 수 있습니다. 컷 하나를 짚어 의견을 남기시면
+    그대로 받아서 고치고 같은 주소로 다시 올립니다. 링크는 바뀌지 않습니다.<br>
+    <b>다음</b> — 위 네 가지가 정해지면 같은 형식으로 12컷을 만듭니다. 그전에 여섯 컷 자체가
+    마음에 안 들면, 늘리지 말고 여섯 개를 다시 쓰는 쪽이 훨씬 쌉니다.
+  </footer>
+
+</div>

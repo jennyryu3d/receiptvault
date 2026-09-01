@@ -1,0 +1,38 @@
+# 컷 manifest 예시 — 아직 자리 표시용
+# 이 파일 하나가 샷 하나에 대한 유일한 진실이다.
+# 규칙과 이유: docs/03-pipeline.md
+
+id: EP01_C05_S01
+episode: EP01
+cut: 5
+shot: 1
+title: "절정 · 군중 와이드"
+duration_sec: 14
+
+look:
+  world: past              # past | future — 색온도가 여기서 갈린다
+  camera: "WIDE, 35mm, 고정"
+  rule: "중앙은 성경 인물의 자리. 주인공은 프레임 가장자리."
+
+generation:
+  provider: null           # 구현 시점에 실측 비교로 결정
+  model: null
+  model_version: null
+  seed: null               # 정해지면 절대 바꾸지 않는다
+  prompt: |
+    (아직 없음)
+  negative_prompt: |
+    (아직 없음)
+  refs:
+    - assets/char/haran_sheet_v1.png
+
+review:
+  status: draft            # draft | generated | approved | rejected
+  reviewed_by: null
+  notes: []
+
+outputs: []
+  # - kind: still          # still | clip | audio
+  #   sha256: "…"
+  #   uri: "r2://bible-assets/EP01/C05/S01/<sha>.png"
+  #   created_at: "…"

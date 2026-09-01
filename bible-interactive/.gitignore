@@ -1,0 +1,14 @@
+# 에셋 바이너리는 저장소에 들어오지 않는다 (docs/03-pipeline.md)
+assets/cache/
+*.mp4
+*.mov
+*.exr
+*.psd
+!assets/char/*.png
+
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.DS_Store
