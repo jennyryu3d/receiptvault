@@ -16,6 +16,7 @@
 | `docs/03-pipeline.md` | 에셋 파이프라인 — Git은 레시피, 스토리지는 결과물 |
 | `docs/04-workflow.md` | 사람이 늘었을 때의 작업 흐름 |
 | `boards/6cut.html` | 발행되는 6컷 보드 원본 |
+| `boards/blueprint.html` | 발행되는 설계도 페이지 원본 |
 | `shots/` | 컷별 manifest — **에셋에 관한 모든 진실은 여기 있다** |
 
 ## 원칙 하나
