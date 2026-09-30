@@ -177,9 +177,30 @@ var REMODEL = [
 
   { key: 'p_design', group: 'basis', ord: 8, line: '', deduct: 1,
     ko: '설계 · 허가 · 검사', en: 'Design, permits and inspection fees',
-    hint: '건축가, 인테리어 설계, 시청 허가비, 검사비' },
+    hint: '건축가, 인테리어 설계, 시청 허가비, 검사비. ' +
+          'Dscheme 에 낸 돈은 아래 세 줄로 따로 나눠서 넣어' },
 
-  { key: 'p_labor', group: 'basis', ord: 9, line: '', deduct: 1,
+  // ---------- Dscheme (설계 사무소) ----------
+  //
+  // 같은 "설계" 라도 착수금 / 도면·허가 / 외주용역은 계약 단계가 달라서
+  // 한 칸에 몰아 넣으면 어디까지 진행됐고 얼마나 나갔는지가 안 읽힌다.
+  // 셋 다 공사가 실제로 지어지면 취득원가(cost basis)에 들어간다 —
+  // 설계만 하고 짓지 않으면 못 들어가므로, 그 경우엔 세무사에게 알려야 한다.
+  { key: 'p_ds_retainer', group: 'basis', ord: 9, line: '', deduct: 1,
+    ko: 'Dscheme 착수금', en: 'Dscheme — design retainer',
+    hint: '계약할 때 먼저 낸 돈. 보통 나중에 총 설계비에서 차감되니 ' +
+          '계약 조건(총액·차감 방식)을 목적란에 적어두면 나중에 맞춰보기 쉬워' },
+
+  { key: 'p_ds_drawings', group: 'basis', ord: 10, line: '', deduct: 1,
+    ko: 'Dscheme 도면 · 퍼미션', en: 'Dscheme — drawings and permits',
+    hint: '기본·실시 설계 도면, 도면 수정, 시청 제출·허가 진행 비용' },
+
+  { key: 'p_ds_consultants', group: 'basis', ord: 11, line: '', deduct: 1,
+    ko: 'Dscheme 외주용역', en: 'Dscheme — outside consultants',
+    hint: 'Dscheme 을 통해 쓴 외부 전문가 — 구조, 측량, 토목, 에너지 계산 등. ' +
+          '어떤 용역인지 목적란에 적어둘 것' },
+
+  { key: 'p_labor', group: 'basis', ord: 12, line: '', deduct: 1,
     ko: '시공비 · 인건비', en: 'Contractor labor',
     hint: '시공사 기성금, 인건비. 어떤 공사분인지 목적란에 적어둘 것' },
 
